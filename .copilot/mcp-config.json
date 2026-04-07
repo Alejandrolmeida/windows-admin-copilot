@@ -40,7 +40,7 @@
     "vmware-vsphere-mcp": {
       "command": "python",
       "args": [
-        "C:\\mcp-servers\\vmware-vsphere-mcp-server\\server.py"
+        "C:\\mcp-servers\\vmware-vsphere-mcp-server\\src\\vsphere_mcp_server\\server.py"
       ],
       "description": "VMware vSphere MCP - Gestión de VMs, snapshots, clones, redes y almacenamiento vCenter.",
       "env": {
