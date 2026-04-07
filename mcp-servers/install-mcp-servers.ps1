@@ -13,6 +13,32 @@ $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";"
 Write-Host "=== Instalando servidores MCP ===" -ForegroundColor Cyan
 
 # ----------------------------------------------------------
+# 0. Verificar y preparar pip
+# ----------------------------------------------------------
+Write-Host "`n[0/5] Verificando Python y pip..." -ForegroundColor Yellow
+
+# Verificar que Python está instalado
+if (-not (Get-Command python -EA SilentlyContinue)) {
+    Write-Host "Python no encontrado. Instalando..." -ForegroundColor Yellow
+    winget install --id Python.Python.3.13 --silent --accept-source-agreements --accept-package-agreements
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+}
+
+$pyVersion = python --version 2>&1
+Write-Host "Python: $pyVersion" -ForegroundColor Green
+
+# Asegurar que pip está disponible y actualizado
+Write-Host "Actualizando pip..." -ForegroundColor Yellow
+python -m ensurepip --upgrade 2>&1 | Out-Null
+python -m pip install --upgrade pip --quiet
+
+# Crear alias de función para usar siempre "python -m pip"
+function pip { python -m pip @args }
+
+$pipVersion = python -m pip --version 2>&1
+Write-Host "pip: $pipVersion" -ForegroundColor Green
+
+# ----------------------------------------------------------
 # 1. PowerShell.MCP (PSGallery)
 # ----------------------------------------------------------
 Write-Host "`n[1/5] PowerShell.MCP..." -ForegroundColor Yellow
@@ -48,7 +74,7 @@ if (-not (Test-Path $dest)) {
     git clone https://github.com/Cosmicjedi/windows-admin-mcp.git $dest
 }
 Push-Location $dest
-pip install -r requirements.txt --quiet
+python -m pip install -r requirements.txt --quiet
 Pop-Location
 Write-Host "windows-admin-mcp OK -> $dest\windows_admin_server.py" -ForegroundColor Green
 
@@ -69,7 +95,7 @@ if (-not (Test-Path $dest)) {
 }
 Push-Location $dest
 if (Test-Path "requirements.txt") {
-    pip install -r requirements.txt --quiet
+    python -m pip install -r requirements.txt --quiet
 }
 Pop-Location
 Write-Host "VMware vSphere MCP OK -> $dest" -ForegroundColor Green
