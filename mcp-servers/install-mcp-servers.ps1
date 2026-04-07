@@ -13,29 +13,59 @@ $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";"
 Write-Host "=== Instalando servidores MCP ===" -ForegroundColor Cyan
 
 # ----------------------------------------------------------
-# 0. Verificar y preparar pip
+# 0. Verificar y preparar Python y pip
 # ----------------------------------------------------------
 Write-Host "`n[0/5] Verificando Python y pip..." -ForegroundColor Yellow
 
-# Verificar que Python está instalado
-if (-not (Get-Command python -EA SilentlyContinue)) {
-    Write-Host "Python no encontrado. Instalando..." -ForegroundColor Yellow
-    winget install --id Python.Python.3.13 --silent --accept-source-agreements --accept-package-agreements
-    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+# Buscar Python en rutas conocidas (miniconda, conda, instalación estándar)
+# evitando el alias stub del Windows Store que no es un Python real
+$pythonCandidates = @(
+    "$env:USERPROFILE\miniconda3\python.exe",
+    "$env:USERPROFILE\anaconda3\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+    "C:\Python313\python.exe",
+    "C:\Python312\python.exe"
+)
+
+$script:pythonExe = $null
+foreach ($candidate in $pythonCandidates) {
+    if (Test-Path $candidate) {
+        $script:pythonExe = $candidate
+        break
+    }
 }
 
-$pyVersion = python --version 2>&1
-Write-Host "Python: $pyVersion" -ForegroundColor Green
+# Si no se encontró, intentar 'python' del PATH pero verificar que no sea el stub del Store
+if (-not $script:pythonExe) {
+    $pyCmd = Get-Command python -EA SilentlyContinue
+    if ($pyCmd) {
+        $testOutput = & $pyCmd.Source --version 2>&1
+        if ($testOutput -match 'Python \d') {
+            $script:pythonExe = $pyCmd.Source
+        }
+    }
+}
+
+# Si aún no hay Python, instalarlo via winget
+if (-not $script:pythonExe) {
+    Write-Host "Python no encontrado. Instalando Python 3.13..." -ForegroundColor Yellow
+    winget install --id Python.Python.3.13 --silent --accept-source-agreements --accept-package-agreements
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+    $script:pythonExe = "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
+}
+
+Write-Host "Python encontrado: $script:pythonExe" -ForegroundColor Green
+$pyVersion = & $script:pythonExe --version 2>&1
+Write-Host "Version: $pyVersion" -ForegroundColor Green
 
 # Asegurar que pip está disponible y actualizado
 Write-Host "Actualizando pip..." -ForegroundColor Yellow
-python -m ensurepip --upgrade 2>&1 | Out-Null
-python -m pip install --upgrade pip --quiet
+& $script:pythonExe -m ensurepip --upgrade 2>&1 | Out-Null
+& $script:pythonExe -m pip install --upgrade pip --quiet
 
-# Crear alias de función para usar siempre "python -m pip"
-function pip { python -m pip @args }
-
-$pipVersion = python -m pip --version 2>&1
+$pipVersion = & $script:pythonExe -m pip --version 2>&1
 Write-Host "pip: $pipVersion" -ForegroundColor Green
 
 # ----------------------------------------------------------
@@ -47,18 +77,27 @@ if (-not (Get-Module PowerShell.MCP -ListAvailable)) {
 }
 Write-Host "PowerShell.MCP OK" -ForegroundColor Green
 
-# Actualizar mcp-config.json con la ruta real del proxy
-$proxyPath = & "C:\Program Files\PowerShell\7\pwsh.exe" -NonInteractive -Command "Import-Module PowerShell.MCP; Get-MCPProxyPath" 2>$null | Where-Object { $_ -match '\.exe' }
-if ($proxyPath) {
-    $mcpConfigPath = Join-Path (Split-Path $MyInvocation.MyCommand.Path) "..\\.copilot\\mcp-config.json"
-    $mcpConfigPath = (Resolve-Path $mcpConfigPath -EA SilentlyContinue)?.Path
-    if ($mcpConfigPath) {
-        $cfg = Get-Content $mcpConfigPath -Raw | ConvertFrom-Json
-        $cfg.'powershell-mcp'.command = $proxyPath.Trim()
-        $cfg.'powershell-mcp'.args = @()
-        $cfg | ConvertTo-Json -Depth 10 | Set-Content $mcpConfigPath -Encoding UTF8
-        Write-Host "powershell-mcp proxy actualizado: $proxyPath" -ForegroundColor Green
+# Actualizar mcp-config.json con la ruta real del proxy (si Get-MCPProxyPath existe)
+try {
+    $proxyPath = & "C:\Program Files\PowerShell\7\pwsh.exe" -NonInteractive -Command `
+        "Import-Module PowerShell.MCP -EA SilentlyContinue; if (Get-Command Get-MCPProxyPath -EA SilentlyContinue) { Get-MCPProxyPath }" `
+        2>$null | Where-Object { $_ -match '\.exe$' } | Select-Object -First 1
+
+    if ($proxyPath -and (Test-Path $proxyPath.Trim())) {
+        $mcpConfigPath = Join-Path (Split-Path $MyInvocation.MyCommand.Path) "..\\.copilot\\mcp-config.json"
+        $mcpConfigPath = (Resolve-Path $mcpConfigPath -EA SilentlyContinue)?.Path
+        if ($mcpConfigPath) {
+            $cfgRaw  = Get-Content $mcpConfigPath -Raw | ConvertFrom-Json -AsHashtable
+            $cfgRaw['powershell-mcp']['command'] = $proxyPath.Trim()
+            $cfgRaw['powershell-mcp']['args']    = @()
+            $cfgRaw | ConvertTo-Json -Depth 10 | Set-Content $mcpConfigPath -Encoding UTF8
+            Write-Host "powershell-mcp proxy actualizado: $proxyPath" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "powershell-mcp: usando configuracion existente del mcp-config.json" -ForegroundColor Yellow
     }
+} catch {
+    Write-Host "powershell-mcp proxy update omitido (no critico): $_" -ForegroundColor Yellow
 }
 
 # ----------------------------------------------------------
@@ -88,7 +127,7 @@ if (-not (Test-Path $dest)) {
     git clone https://github.com/Cosmicjedi/windows-admin-mcp.git $dest
 }
 Push-Location $dest
-python -m pip install -r requirements.txt --quiet
+& $script:pythonExe -m pip install -r requirements.txt --quiet
 Pop-Location
 Write-Host "windows-admin-mcp OK -> $dest\windows_admin_server.py" -ForegroundColor Green
 
@@ -109,7 +148,7 @@ if (-not (Test-Path $dest)) {
 }
 Push-Location $dest
 if (Test-Path "requirements.txt") {
-    python -m pip install -r requirements.txt --quiet
+    & $script:pythonExe -m pip install -r requirements.txt --quiet
 }
 Pop-Location
 

@@ -18,7 +18,7 @@
     },
 
     "windows-admin-mcp": {
-      "command": "python",
+      "command": "C:\\Users\\%USERNAME%\\miniconda3\\python.exe",
       "args": [
         "C:\\mcp-servers\\windows-admin-mcp\\windows_admin_server.py"
       ],
@@ -38,7 +38,7 @@
     },
 
     "vmware-vsphere-mcp": {
-      "command": "python",
+      "command": "C:\\Users\\%USERNAME%\\miniconda3\\python.exe",
       "args": [
         "C:\\mcp-servers\\vmware-vsphere-mcp-server\\run_server_stdio.py"
       ],
