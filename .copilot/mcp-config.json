@@ -2,8 +2,8 @@
   "mcpServers": {
 
     "powershell-mcp": {
-      "command": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
-      "args": ["-NonInteractive", "-Command", "Import-Module PowerShell.MCP; Start-MCPServer"],
+      "command": "C:\\Program Files\\PowerShell\\Modules\\PowerShell.MCP\\1.7.6\\bin\\win-x64\\PowerShell.MCP.Proxy.exe",
+      "args": [],
       "description": "PowerShell.MCP - Acceso a 10,000+ módulos PSGallery. Gestión completa de Windows local/remoto."
     },
 
@@ -40,7 +40,7 @@
     "vmware-vsphere-mcp": {
       "command": "python",
       "args": [
-        "C:\\mcp-servers\\vmware-vsphere-mcp-server\\src\\vsphere_mcp_server\\server.py"
+        "C:\\mcp-servers\\vmware-vsphere-mcp-server\\run_server_stdio.py"
       ],
       "description": "VMware vSphere MCP - Gestión de VMs, snapshots, clones, redes y almacenamiento vCenter.",
       "env": {

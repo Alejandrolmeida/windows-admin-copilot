@@ -47,6 +47,20 @@ if (-not (Get-Module PowerShell.MCP -ListAvailable)) {
 }
 Write-Host "PowerShell.MCP OK" -ForegroundColor Green
 
+# Actualizar mcp-config.json con la ruta real del proxy
+$proxyPath = & "C:\Program Files\PowerShell\7\pwsh.exe" -NonInteractive -Command "Import-Module PowerShell.MCP; Get-MCPProxyPath" 2>$null | Where-Object { $_ -match '\.exe' }
+if ($proxyPath) {
+    $mcpConfigPath = Join-Path (Split-Path $MyInvocation.MyCommand.Path) "..\\.copilot\\mcp-config.json"
+    $mcpConfigPath = (Resolve-Path $mcpConfigPath -EA SilentlyContinue)?.Path
+    if ($mcpConfigPath) {
+        $cfg = Get-Content $mcpConfigPath -Raw | ConvertFrom-Json
+        $cfg.'powershell-mcp'.command = $proxyPath.Trim()
+        $cfg.'powershell-mcp'.args = @()
+        $cfg | ConvertTo-Json -Depth 10 | Set-Content $mcpConfigPath -Encoding UTF8
+        Write-Host "powershell-mcp proxy actualizado: $proxyPath" -ForegroundColor Green
+    }
+}
+
 # ----------------------------------------------------------
 # 2. win-cli-mcp-server (mhprol fork)
 # ----------------------------------------------------------
@@ -98,7 +112,25 @@ if (Test-Path "requirements.txt") {
     python -m pip install -r requirements.txt --quiet
 }
 Pop-Location
-Write-Host "VMware vSphere MCP OK -> $dest" -ForegroundColor Green
+
+# Create stdio wrapper (server.py uses relative imports and HTTP transport by default)
+$wrapperPath = "$dest\run_server_stdio.py"
+if (-not (Test-Path $wrapperPath)) {
+    @'
+"""Wrapper to run vsphere_mcp_server with stdio transport for GitHub Copilot CLI."""
+import sys
+import os
+
+# Add src directory to path to resolve relative imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+from vsphere_mcp_server.server import mcp
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
+'@ | Set-Content $wrapperPath -Encoding UTF8
+}
+Write-Host "VMware vSphere MCP OK -> $wrapperPath" -ForegroundColor Green
 
 # ----------------------------------------------------------
 # Copiar mcp-config.json al perfil del usuario actual
