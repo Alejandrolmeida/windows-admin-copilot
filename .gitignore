@@ -1,0 +1,28 @@
+# Secrets / credenciales
+.env
+*.env.*
+secrets.json
+
+# Contraseñas en config local
+mcp-config.local.json
+
+# Logs
+*.log
+logs/
+
+# Node
+node_modules/
+dist/
+.npm/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
