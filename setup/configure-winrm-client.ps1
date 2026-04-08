@@ -57,29 +57,32 @@ Write-Log "Servicio WinRM: $(Get-Service WinRM | Select-Object -ExpandProperty S
 # -------------------------------------------------------
 # 2. Configurar TrustedHosts
 # -------------------------------------------------------
-if (-not $Test -and $RemoteHost) {
-
-    Write-Log "Configurando TrustedHosts para: $RemoteHost"
+if ($RemoteHost -and $RemoteHost -ne '*') {
 
     $current = (Get-Item WSMan:\localhost\Client\TrustedHosts).Value
+    $alreadyTrusted = ($current -eq '*') -or
+                      ($current -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -eq $RemoteHost })
 
-    if ($current -eq '*') {
-        Write-Log "TrustedHosts ya es '*' (confía en todos)" 'OK'
-    } elseif ($current -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -eq $RemoteHost }) {
-        Write-Log "'$RemoteHost' ya está en TrustedHosts" 'OK'
-    } else {
-        $newValue = if ([string]::IsNullOrWhiteSpace($current)) {
-            $RemoteHost
-        } else {
-            "$current,$RemoteHost"
-        }
-        Set-Item WSMan:\localhost\Client\TrustedHosts -Value $newValue -Force
-        Write-Log "TrustedHosts actualizado: $newValue" 'OK'
+    if ($Test -and -not $alreadyTrusted) {
+        Write-Log "'$RemoteHost' NO está en TrustedHosts — las conexiones HTTP a IPs fallarán" 'WARN'
+        Write-Log "Ejecuta el script SIN -Test primero para configurarlo, luego vuelve a probar" 'WARN'
     }
 
-    # Mostrar valor actual
-    $trusted = (Get-Item WSMan:\localhost\Client\TrustedHosts).Value
-    Write-Log "TrustedHosts actual: $trusted" 'OK'
+    if (-not $Test) {
+        if ($current -eq '*') {
+            Write-Log "TrustedHosts ya es '*' (confía en todos)" 'OK'
+        } elseif ($alreadyTrusted) {
+            Write-Log "'$RemoteHost' ya está en TrustedHosts" 'OK'
+        } else {
+            $newValue = if ([string]::IsNullOrWhiteSpace($current)) { $RemoteHost } else { "$current,$RemoteHost" }
+            Set-Item WSMan:\localhost\Client\TrustedHosts -Value $newValue -Force
+            Write-Log "TrustedHosts actualizado: $newValue" 'OK'
+        }
+
+        # Mostrar valor actual
+        $trusted = (Get-Item WSMan:\localhost\Client\TrustedHosts).Value
+        Write-Log "TrustedHosts actual: $trusted" 'OK'
+    }
 }
 
 # -------------------------------------------------------
