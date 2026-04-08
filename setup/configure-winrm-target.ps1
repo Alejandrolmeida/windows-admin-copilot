@@ -36,6 +36,21 @@ function Write-Log {
     Write-Host "[$(Get-Date -Format 'HH:mm:ss')][$Level] $Message" -ForegroundColor $color
 }
 
+# -------------------------------------------------------
+# Verificacion de version de PowerShell
+# -------------------------------------------------------
+$psVersion = $PSVersionTable.PSVersion
+Write-Log "PowerShell detectado: $($psVersion.Major).$($psVersion.Minor)"
+
+if ($psVersion.Major -lt 3) {
+    Write-Log "PowerShell 3.0 o superior requerido. Version actual: $psVersion" 'ERROR'
+    Write-Log "Descarga WMF 5.1: https://aka.ms/wmf51" 'ERROR'
+    exit 1
+}
+
+# New-SelfSignedCertificate con parametros avanzados requiere PS 5.0+
+$script:advancedCertSupported = ($psVersion.Major -ge 5)
+
 $hostname = $env:COMPUTERNAME
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
@@ -143,12 +158,23 @@ if (-not $HttpOnly) {
     # 4c. Crear certificado autofirmado si no hay ninguno
     if (-not $cert) {
         Write-Log "No se encontró certificado. Creando certificado autofirmado para $hostname..." 'WARN'
-        $cert = New-SelfSignedCertificate `
-            -DnsName $hostname, "localhost" `
-            -CertStoreLocation "Cert:\LocalMachine\My" `
-            -NotAfter (Get-Date).AddYears(5) `
-            -KeyUsage DigitalSignature, KeyEncipherment `
-            -KeyAlgorithm RSA -KeyLength 2048
+
+        if ($script:advancedCertSupported) {
+            # PS 5.0+ — parámetros completos
+            $cert = New-SelfSignedCertificate `
+                -DnsName $hostname, "localhost" `
+                -CertStoreLocation "Cert:\LocalMachine\My" `
+                -NotAfter (Get-Date).AddYears(5) `
+                -KeyUsage DigitalSignature, KeyEncipherment `
+                -KeyAlgorithm RSA -KeyLength 2048
+        } else {
+            # PS 3.0/4.0 — parámetros básicos (Windows Server 2012/2012 R2)
+            Write-Log "PS $($psVersion.Major).$($psVersion.Minor): usando New-SelfSignedCertificate básico" 'WARN'
+            $cert = New-SelfSignedCertificate `
+                -DnsName $hostname `
+                -CertStoreLocation "Cert:\LocalMachine\My"
+        }
+
         Write-Log "Certificado autofirmado creado: Thumbprint=$($cert.Thumbprint)" 'OK'
         Write-Log "NOTA: Para máxima seguridad, reemplázalo por un certificado de CA de confianza." 'WARN'
     }
