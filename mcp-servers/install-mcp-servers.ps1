@@ -10,23 +10,32 @@ New-Item -ItemType Directory -Path $mcpRoot -Force | Out-Null
 
 $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
 
+# Resolución robusta de nombre de usuario (evita $env:USERNAME vacío en sesiones elevadas)
+$script:resolvedUser = $env:USERNAME
+if ([string]::IsNullOrWhiteSpace($script:resolvedUser)) {
+    $script:resolvedUser = Split-Path $env:USERPROFILE -Leaf
+}
+
 Write-Host "=== Instalando servidores MCP ===" -ForegroundColor Cyan
+Write-Host "Usuario: $script:resolvedUser | Perfil: $env:USERPROFILE" -ForegroundColor Gray
 
 # ----------------------------------------------------------
 # 0. Verificar y preparar Python y pip
 # ----------------------------------------------------------
 Write-Host "`n[0/5] Verificando Python y pip..." -ForegroundColor Yellow
 
-# Buscar Python en rutas conocidas (miniconda, conda, instalación estándar)
-# evitando el alias stub del Windows Store que no es un Python real
+# Buscar Python en rutas conocidas — prioridad: Miniconda > Anaconda > Python estándar
+# Se evita el alias stub del Windows Store (no es un Python real)
 $pythonCandidates = @(
     "$env:USERPROFILE\miniconda3\python.exe",
+    "$env:USERPROFILE\miniconda3\envs\base\python.exe",
     "$env:USERPROFILE\anaconda3\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
     "C:\Python313\python.exe",
-    "C:\Python312\python.exe"
+    "C:\Python312\python.exe",
+    "C:\Python311\python.exe"
 )
 
 $script:pythonExe = $null
@@ -40,7 +49,7 @@ foreach ($candidate in $pythonCandidates) {
 # Si no se encontró, intentar 'python' del PATH pero verificar que no sea el stub del Store
 if (-not $script:pythonExe) {
     $pyCmd = Get-Command python -EA SilentlyContinue
-    if ($pyCmd) {
+    if ($pyCmd -and $pyCmd.Source -notlike "*WindowsApps*") {
         $testOutput = & $pyCmd.Source --version 2>&1
         if ($testOutput -match 'Python \d') {
             $script:pythonExe = $pyCmd.Source
@@ -48,12 +57,19 @@ if (-not $script:pythonExe) {
     }
 }
 
-# Si aún no hay Python, instalarlo via winget
+# Si aún no hay Python, instalar Miniconda3 (preferido) con fallback a Python estándar
 if (-not $script:pythonExe) {
-    Write-Host "Python no encontrado. Instalando Python 3.13..." -ForegroundColor Yellow
-    winget install --id Python.Python.3.13 --silent --accept-source-agreements --accept-package-agreements
+    Write-Host "Python no encontrado. Instalando Miniconda3 via winget..." -ForegroundColor Yellow
+    winget install --id Anaconda.Miniconda3 --silent --accept-source-agreements --accept-package-agreements
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
-    $script:pythonExe = "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
+    if (Test-Path "$env:USERPROFILE\miniconda3\python.exe") {
+        $script:pythonExe = "$env:USERPROFILE\miniconda3\python.exe"
+    } else {
+        Write-Host "Miniconda no disponible, instalando Python 3.13 via winget..." -ForegroundColor Yellow
+        winget install --id Python.Python.3.13 --silent --accept-source-agreements --accept-package-agreements
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+        $script:pythonExe = "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe"
+    }
 }
 
 Write-Host "Python encontrado: $script:pythonExe" -ForegroundColor Green
@@ -69,35 +85,29 @@ $pipVersion = & $script:pythonExe -m pip --version 2>&1
 Write-Host "pip: $pipVersion" -ForegroundColor Green
 
 # ----------------------------------------------------------
-# 1. PowerShell.MCP (PSGallery)
+# 1. PowerShell.MCP (PSGallery) — instalar o actualizar
 # ----------------------------------------------------------
 Write-Host "`n[1/5] PowerShell.MCP..." -ForegroundColor Yellow
-if (-not (Get-Module PowerShell.MCP -ListAvailable)) {
+$existingMCP = Get-Module PowerShell.MCP -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+if (-not $existingMCP) {
     Install-PSResource -Name PowerShell.MCP -Repository PSGallery -Scope AllUsers -TrustRepository
+} else {
+    Write-Host "Actualizando PowerShell.MCP (instalado: $($existingMCP.Version))..." -ForegroundColor Gray
+    Install-PSResource -Name PowerShell.MCP -Repository PSGallery -Scope AllUsers -TrustRepository -Reinstall -EA SilentlyContinue
 }
-Write-Host "PowerShell.MCP OK" -ForegroundColor Green
+$newMCP = Get-Module PowerShell.MCP -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+Write-Host "PowerShell.MCP OK (version: $($newMCP.Version))" -ForegroundColor Green
 
-# Actualizar mcp-config.json con la ruta real del proxy (si Get-MCPProxyPath existe)
+# Obtener la ruta real del proxy
+$script:proxyPath = $null
 try {
-    $proxyPath = & "C:\Program Files\PowerShell\7\pwsh.exe" -NonInteractive -Command `
+    $script:proxyPath = & "C:\Program Files\PowerShell\7\pwsh.exe" -NonInteractive -Command `
         "Import-Module PowerShell.MCP -EA SilentlyContinue; if (Get-Command Get-MCPProxyPath -EA SilentlyContinue) { Get-MCPProxyPath }" `
         2>$null | Where-Object { $_ -match '\.exe$' } | Select-Object -First 1
-
-    if ($proxyPath -and (Test-Path $proxyPath.Trim())) {
-        $mcpConfigPath = Join-Path (Split-Path $MyInvocation.MyCommand.Path) "..\\.copilot\\mcp-config.json"
-        $mcpConfigPath = (Resolve-Path $mcpConfigPath -EA SilentlyContinue)?.Path
-        if ($mcpConfigPath) {
-            $cfgRaw  = Get-Content $mcpConfigPath -Raw | ConvertFrom-Json -AsHashtable
-            $cfgRaw['powershell-mcp']['command'] = $proxyPath.Trim()
-            $cfgRaw['powershell-mcp']['args']    = @()
-            $cfgRaw | ConvertTo-Json -Depth 10 | Set-Content $mcpConfigPath -Encoding UTF8
-            Write-Host "powershell-mcp proxy actualizado: $proxyPath" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "powershell-mcp: usando configuracion existente del mcp-config.json" -ForegroundColor Yellow
-    }
+    if ($script:proxyPath) { $script:proxyPath = $script:proxyPath.Trim() }
+    if ($script:proxyPath) { Write-Host "Proxy path detectado: $script:proxyPath" -ForegroundColor Green }
 } catch {
-    Write-Host "powershell-mcp proxy update omitido (no critico): $_" -ForegroundColor Yellow
+    Write-Host "No se pudo obtener la ruta del proxy (no crítico)" -ForegroundColor Yellow
 }
 
 # ----------------------------------------------------------
@@ -105,7 +115,10 @@ try {
 # ----------------------------------------------------------
 Write-Host "`n[2/5] win-cli-mcp-server..." -ForegroundColor Yellow
 $dest = "$mcpRoot\win-cli-mcp-server"
-if (-not (Test-Path $dest)) {
+if (Test-Path "$dest\.git") {
+    Write-Host "Actualizando repositorio existente..." -ForegroundColor Gray
+    Push-Location $dest; git pull --quiet; Pop-Location
+} elseif (-not (Test-Path $dest)) {
     git clone https://github.com/mhprol/win-cli-mcp-server.git $dest
 }
 Push-Location $dest
@@ -123,11 +136,14 @@ Write-Host "win-cli-mcp-server OK -> $dest\dist\index.js" -ForegroundColor Green
 # ----------------------------------------------------------
 Write-Host "`n[3/5] windows-admin-mcp..." -ForegroundColor Yellow
 $dest = "$mcpRoot\windows-admin-mcp"
-if (-not (Test-Path $dest)) {
+if (Test-Path "$dest\.git") {
+    Write-Host "Actualizando repositorio existente..." -ForegroundColor Gray
+    Push-Location $dest; git pull --quiet; Pop-Location
+} elseif (-not (Test-Path $dest)) {
     git clone https://github.com/Cosmicjedi/windows-admin-mcp.git $dest
 }
 Push-Location $dest
-& $script:pythonExe -m pip install -r requirements.txt --quiet
+& $script:pythonExe -m pip install -r requirements.txt --upgrade --quiet
 Pop-Location
 Write-Host "windows-admin-mcp OK -> $dest\windows_admin_server.py" -ForegroundColor Green
 
@@ -143,12 +159,15 @@ Write-Host "Azure MCP OK (npx @azure/mcp@latest)" -ForegroundColor Green
 # ----------------------------------------------------------
 Write-Host "`n[5/5] VMware vSphere MCP..." -ForegroundColor Yellow
 $dest = "$mcpRoot\vmware-vsphere-mcp-server"
-if (-not (Test-Path $dest)) {
+if (Test-Path "$dest\.git") {
+    Write-Host "Actualizando repositorio existente..." -ForegroundColor Gray
+    Push-Location $dest; git pull --quiet; Pop-Location
+} elseif (-not (Test-Path $dest)) {
     git clone https://github.com/giuliolibrando/vmware-vsphere-mcp-server.git $dest
 }
 Push-Location $dest
 if (Test-Path "requirements.txt") {
-    & $script:pythonExe -m pip install -r requirements.txt --quiet
+    & $script:pythonExe -m pip install -r requirements.txt --upgrade --quiet
 }
 Pop-Location
 
@@ -172,20 +191,55 @@ if __name__ == "__main__":
 Write-Host "VMware vSphere MCP OK -> $wrapperPath" -ForegroundColor Green
 
 # ----------------------------------------------------------
-# Copiar mcp-config.json al perfil del usuario actual
+# Copiar y configurar mcp-config.json al perfil del usuario
 # ----------------------------------------------------------
-Write-Host "`n=== Copiando configuracion MCP ===" -ForegroundColor Cyan
+Write-Host "`n=== Configurando mcp-config.json ===" -ForegroundColor Cyan
 $copilotDir = "$env:USERPROFILE\.copilot"
 New-Item -ItemType Directory -Path $copilotDir -Force | Out-Null
 $configSrc = Join-Path (Split-Path $MyInvocation.MyCommand.Path) "..\\.copilot\\mcp-config.json"
 $configSrc = (Resolve-Path $configSrc -EA SilentlyContinue)?.Path
+$configDst = "$copilotDir\mcp-config.json"
 if ($configSrc -and (Test-Path $configSrc)) {
-    # Leer template, sustituir %USERNAME% por el usuario actual y escribir en destino
+    # Backup si ya existe
+    if (Test-Path $configDst) {
+        $backup = "$configDst.backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        Copy-Item $configDst $backup
+        Write-Host "Backup guardado: $backup" -ForegroundColor Gray
+    }
+    # Leer template, resolver %USERNAME% con valor fiable
     $configContent = Get-Content $configSrc -Raw
-    $configContent = $configContent.Replace('%USERNAME%', $env:USERNAME)
-    $configContent | Set-Content "$copilotDir\mcp-config.json" -Encoding UTF8
-    Write-Host "mcp-config.json copiado a $copilotDir (usuario: $env:USERNAME)" -ForegroundColor Green
-    Write-Host "IMPORTANTE: Edita $copilotDir\mcp-config.json con tus credenciales de servidores" -ForegroundColor Yellow
+    $configContent = $configContent.Replace('%USERNAME%', $script:resolvedUser)
+    $config = $configContent | ConvertFrom-Json
+
+    # Escribir ruta real de Python en ambos servidores Python
+    $config.mcpServers.'windows-admin-mcp'.command  = $script:pythonExe
+    $config.mcpServers.'vmware-vsphere-mcp'.command = $script:pythonExe
+    Write-Host "Python path: $script:pythonExe" -ForegroundColor Green
+
+    # Actualizar proxy de PowerShell.MCP si se detectó
+    if ($script:proxyPath -and (Test-Path $script:proxyPath)) {
+        $config.mcpServers.'powershell-mcp'.command = $script:proxyPath
+        Write-Host "powershell-mcp proxy: $script:proxyPath" -ForegroundColor Green
+    }
+
+    $config | ConvertTo-Json -Depth 10 | Out-File $configDst -Encoding UTF8
+    Write-Host "mcp-config.json instalado en $configDst" -ForegroundColor Green
+    Write-Host "IMPORTANTE: Edita $configDst con tus credenciales de servidores" -ForegroundColor Yellow
 }
 
 Write-Host "`n=== Todos los MCP instalados correctamente ===" -ForegroundColor Green
+
+# Verificación rápida de ejecutables
+$finalCfg = Get-Content $configDst -Raw | ConvertFrom-Json
+$finalCfg.mcpServers.PSObject.Properties | ForEach-Object {
+    $name = $_.Name; $cmd = $_.Value.command
+    if ($cmd) {
+        $exists = if ([System.IO.Path]::IsPathRooted($cmd)) {
+            Test-Path $cmd -EA SilentlyContinue
+        } else {
+            $null -ne (Get-Command $cmd -EA SilentlyContinue)
+        }
+        $status = if ($exists) { '  ✅' } else { '  ⚠️  NO ENCONTRADO' }
+        Write-Host "$status  $name -> $cmd"
+    }
+}
