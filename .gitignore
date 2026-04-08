@@ -6,6 +6,9 @@ secrets.json
 # Contraseñas en config local
 mcp-config.local.json
 
+# MCP Memory — datos personales, no compartir en el repo
+memory.json
+
 # Logs
 *.log
 logs/

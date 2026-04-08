@@ -50,6 +50,15 @@
         "VCENTER_PORT": "443",
         "VCENTER_SSL_VERIFY": "false"
       }
+    },
+
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "description": "MCP Memory - Grafo de conocimiento persistente entre sesiones (entidades, relaciones, observaciones).",
+      "env": {
+        "MEMORY_FILE_PATH": "C:\\mcp-servers\\memory\\memory.json"
+      }
     }
 
   },

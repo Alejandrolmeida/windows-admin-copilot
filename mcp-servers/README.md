@@ -9,6 +9,7 @@
 | `windows-admin-mcp` | Python + WinRM | Administración remota de servidores Windows |
 | `azure-mcp` | Node.js (npx) | Gestión oficial de recursos Azure (Microsoft) |
 | `vmware-vsphere-mcp` | Python | Gestión de VMs en vCenter/ESXi |
+| `memory` | Node.js (npx) | Memoria persistente entre sesiones (grafo de conocimiento) |
 
 ## Hyper-V y VirtualBox
 

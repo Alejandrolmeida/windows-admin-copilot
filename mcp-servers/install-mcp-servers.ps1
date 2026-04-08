@@ -150,14 +150,24 @@ Write-Host "windows-admin-mcp OK -> $dest\windows_admin_server.py" -ForegroundCo
 # ----------------------------------------------------------
 # 4. Azure MCP (@azure/mcp - oficial Microsoft)
 # ----------------------------------------------------------
-Write-Host "`n[4/5] Azure MCP (@azure/mcp)..." -ForegroundColor Yellow
+Write-Host "`n[4/6] Azure MCP (@azure/mcp)..." -ForegroundColor Yellow
 npm install -g @azure/mcp@latest --quiet
 Write-Host "Azure MCP OK (npx @azure/mcp@latest)" -ForegroundColor Green
 
 # ----------------------------------------------------------
-# 5. VMware vSphere MCP (giuliolibrando)
+# 5. MCP Memory (@modelcontextprotocol/server-memory)
 # ----------------------------------------------------------
-Write-Host "`n[5/5] VMware vSphere MCP..." -ForegroundColor Yellow
+Write-Host "`n[5/6] MCP Memory (@modelcontextprotocol/server-memory)..." -ForegroundColor Yellow
+$memoryDir = "$mcpRoot\memory"
+New-Item -ItemType Directory -Path $memoryDir -Force | Out-Null
+# Pre-caché del paquete npx para evitar demora en primer uso
+npx --yes @modelcontextprotocol/server-memory --version 2>$null | Out-Null
+Write-Host "MCP Memory OK -> MEMORY_FILE_PATH=$memoryDir\memory.json" -ForegroundColor Green
+
+# ----------------------------------------------------------
+# 6. VMware vSphere MCP (giuliolibrando)
+# ----------------------------------------------------------
+Write-Host "`n[6/6] VMware vSphere MCP..." -ForegroundColor Yellow
 $dest = "$mcpRoot\vmware-vsphere-mcp-server"
 if (Test-Path "$dest\.git") {
     Write-Host "Actualizando repositorio existente..." -ForegroundColor Gray
