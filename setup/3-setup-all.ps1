@@ -31,7 +31,7 @@ Write-Host "`n[3/3] Servidores MCP..." -ForegroundColor Yellow
 Write-Host "`n========================================" -ForegroundColor Green
 Write-Host "  Setup completado. Proximos pasos:" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "1. Copia .copilot/mcp-config.json a C:\Users\<usuario>\.copilot\"
-Write-Host "2. Edita mcp-config.json con tus credenciales de servidores remotos"
+Write-Host "1. El mcp-config.json ya fue copiado a $env:USERPROFILE\.copilot\ con tu usuario configurado"
+Write-Host "2. Edita $env:USERPROFILE\.copilot\mcp-config.json con tus credenciales de servidores remotos"
 Write-Host "3. Ejecuta 'copilot' y usa /login para autenticarte"
 Write-Host "4. Usa /mcp para verificar los servidores MCP activos"

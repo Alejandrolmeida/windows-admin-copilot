@@ -50,10 +50,13 @@
         "VCENTER_PORT": "443",
         "VCENTER_SSL_VERIFY": "false"
       }
-    },
+    }
 
+  },
+
+  "_docs": {
     "hyper-v": {
-      "_note": "Hyper-V se gestiona via powershell-mcp con el módulo nativo Hyper-V de Windows.",
+      "_note": "Hyper-V se gestiona via powershell-mcp con el módulo nativo Hyper-V de Windows. NO requiere MCP dedicado.",
       "_examples": [
         "Get-VM | Select Name, State, MemoryAssigned",
         "Start-VM -Name 'NombreVM'",
@@ -62,9 +65,8 @@
         "Get-VMSnapshot -VMName 'NombreVM'"
       ]
     },
-
     "virtualbox": {
-      "_note": "VirtualBox se gestiona via win-cli-mcp usando VBoxManage CLI.",
+      "_note": "VirtualBox se gestiona via win-cli-mcp usando VBoxManage CLI. NO requiere MCP dedicado.",
       "_examples": [
         "VBoxManage list vms",
         "VBoxManage list runningvms",
@@ -73,6 +75,6 @@
         "VBoxManage snapshot 'NombreVM' take 'pre-cambio'"
       ]
     }
-
   }
 }
+

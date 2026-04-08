@@ -180,8 +180,11 @@ New-Item -ItemType Directory -Path $copilotDir -Force | Out-Null
 $configSrc = Join-Path (Split-Path $MyInvocation.MyCommand.Path) "..\\.copilot\\mcp-config.json"
 $configSrc = (Resolve-Path $configSrc -EA SilentlyContinue)?.Path
 if ($configSrc -and (Test-Path $configSrc)) {
-    Copy-Item $configSrc "$copilotDir\mcp-config.json" -Force
-    Write-Host "mcp-config.json copiado a $copilotDir" -ForegroundColor Green
+    # Leer template, sustituir %USERNAME% por el usuario actual y escribir en destino
+    $configContent = Get-Content $configSrc -Raw
+    $configContent = $configContent.Replace('%USERNAME%', $env:USERNAME)
+    $configContent | Set-Content "$copilotDir\mcp-config.json" -Encoding UTF8
+    Write-Host "mcp-config.json copiado a $copilotDir (usuario: $env:USERNAME)" -ForegroundColor Green
     Write-Host "IMPORTANTE: Edita $copilotDir\mcp-config.json con tus credenciales de servidores" -ForegroundColor Yellow
 }
 
