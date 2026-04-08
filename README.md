@@ -140,6 +140,27 @@ El script `3-setup-all.ps1` realiza automáticamente:
 .\mcp-servers\install-mcp-servers.ps1
 ```
 
+### Actualización desde versión anterior
+
+Si ya tienes el entorno instalado y quieres actualizar la configuración MCP (sin reinstalar ni perder credenciales):
+
+```powershell
+# 1. Actualizar el repositorio
+cd windows-admin-copilot
+git pull
+
+# 2. Ejecutar el script de actualización
+#    Corrige las rutas Python, limpia entradas inválidas y PRESERVA tus credenciales
+.\setup\update-mcp-config.ps1
+```
+
+El script `update-mcp-config.ps1`:
+- Hace backup automático del config actual (`.copilot/mcp-config.json.backup-YYYYMMDD-HHmmss`)
+- Sustituye el placeholder `%USERNAME%` por tu usuario real
+- Elimina las entradas `hyper-v` y `virtualbox` de `mcpServers` (no son servidores MCP reales)
+- **Preserva** las credenciales de Azure y VMware que ya tenías configuradas
+- Verifica que los ejecutables existan al finalizar
+
 ### Configurar credenciales
 
 Tras la instalación, edita el fichero de configuración MCP:
