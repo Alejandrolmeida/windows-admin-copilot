@@ -160,8 +160,7 @@ Write-Host "Azure MCP OK (npx @azure/mcp@latest)" -ForegroundColor Green
 Write-Host "`n[5/6] MCP Memory (@modelcontextprotocol/server-memory)..." -ForegroundColor Yellow
 $memoryDir = "$mcpRoot\memory"
 New-Item -ItemType Directory -Path $memoryDir -Force | Out-Null
-# Pre-caché del paquete npx para evitar demora en primer uso
-npx --yes @modelcontextprotocol/server-memory --version 2>$null | Out-Null
+npm install -g @modelcontextprotocol/server-memory --quiet
 Write-Host "MCP Memory OK -> MEMORY_FILE_PATH=$memoryDir\memory.json" -ForegroundColor Green
 
 # ----------------------------------------------------------

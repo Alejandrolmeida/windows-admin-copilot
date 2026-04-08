@@ -195,15 +195,15 @@ if (-not $ConfigOnly) {
         Write-Log "Error actualizando @azure/mcp: $_" 'WARN'
     }
 
-    # 1e. MCP Memory (npx — asegurar directorio y caché)
-    Write-Log "MCP Memory (@modelcontextprotocol/server-memory): verificando..."
+    # 1e. MCP Memory (npm global)
+    Write-Log "MCP Memory (@modelcontextprotocol/server-memory): actualizando..."
     try {
         $memoryDir = "$mcpRoot\memory"
         New-Item -ItemType Directory -Path $memoryDir -Force | Out-Null
-        npx --yes @modelcontextprotocol/server-memory --version 2>$null | Out-Null
+        npm install -g @modelcontextprotocol/server-memory --quiet 2>&1 | Out-Null
         Write-Log "MCP Memory OK -> $memoryDir\memory.json" 'OK'
     } catch {
-        Write-Log "Error verificando MCP Memory: $_" 'WARN'
+        Write-Log "Error actualizando MCP Memory: $_" 'WARN'
     }
 
 } else {

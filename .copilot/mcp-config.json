@@ -53,8 +53,8 @@
     },
 
     "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "command": "node",
+      "args": ["%APPDATA%\\npm\\node_modules\\@modelcontextprotocol\\server-memory\\dist\\index.js"],
       "description": "MCP Memory - Grafo de conocimiento persistente entre sesiones (entidades, relaciones, observaciones).",
       "env": {
         "MEMORY_FILE_PATH": "C:\\mcp-servers\\memory\\memory.json"
