@@ -2,14 +2,16 @@
 # configure-winrm-target.ps1
 # Configura WinRM en el equipo DESTINO (el que recibirá conexiones).
 #
-# Lógica de protocolo:
-#   - Si existe certificado válido en LocalMachine\My → HTTPS (5986)
-#   - Si no hay certificado → crea uno autofirmado y activa HTTPS
+# Logica de protocolo:
+#   - Si existe certificado valido en LocalMachine\My -> HTTPS (5986)
+#   - Si no hay certificado -> crea uno autofirmado y activa HTTPS
 #   - HTTP (5985) siempre se activa como fallback
 #
 # Uso:
 #   .\configure-winrm-target.ps1
-#   .\configure-winrm-target.ps1 -HttpOnly          # Solo HTTP, sin HTTPS
+#   .\configure-winrm-target.ps1 -HttpOnly                     # Solo HTTP, sin HTTPS
+#   .\configure-winrm-target.ps1 -ClientHost "192.168.1.10"    # Añade cliente a TrustedHosts
+#   .\configure-winrm-target.ps1 -ClientHost "*"               # Confiar en todos (laboratorio)
 #   .\configure-winrm-target.ps1 -CertThumbprint <thumbprint>  # Usar cert existente
 #
 # Requiere: Ejecutar como Administrador
@@ -19,7 +21,8 @@
 [CmdletBinding()]
 param(
     [switch]$HttpOnly,
-    [string]$CertThumbprint
+    [string]$CertThumbprint,
+    [string]$ClientHost        # IP o nombre del equipo cliente que se conectara a este target
 )
 
 $ErrorActionPreference = 'Stop'
@@ -211,7 +214,30 @@ if (-not $HttpOnly) {
 }
 
 # -------------------------------------------------------
-# 5. Resumen final
+# 5. TrustedHosts — añadir el cliente a la lista de confianza
+# -------------------------------------------------------
+if ($ClientHost) {
+    Write-Log "Configurando TrustedHosts para el cliente: $ClientHost"
+    $current = (Get-Item WSMan:\localhost\Client\TrustedHosts).Value
+
+    if ($current -eq '*') {
+        Write-Log "TrustedHosts ya es '*' (confía en todos)" 'OK'
+    } elseif ($ClientHost -eq '*') {
+        Set-Item WSMan:\localhost\Client\TrustedHosts -Value '*' -Force
+        Write-Log "TrustedHosts establecido a '*' (confía en todos)" 'OK'
+    } elseif ($current -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -eq $ClientHost }) {
+        Write-Log "'$ClientHost' ya estaba en TrustedHosts" 'OK'
+    } else {
+        $newValue = if ([string]::IsNullOrWhiteSpace($current)) { $ClientHost } else { "$current,$ClientHost" }
+        Set-Item WSMan:\localhost\Client\TrustedHosts -Value $newValue -Force
+        Write-Log "TrustedHosts actualizado: $newValue" 'OK'
+    }
+} else {
+    Write-Log "TrustedHosts no modificado (usa -ClientHost <IP> para añadir el equipo cliente)" 'WARN'
+}
+
+# -------------------------------------------------------
+# 6. Resumen final
 # -------------------------------------------------------
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Green
