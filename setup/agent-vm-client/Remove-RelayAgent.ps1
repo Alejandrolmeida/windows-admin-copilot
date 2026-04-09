@@ -1,19 +1,19 @@
 # ============================================================
 # Remove-RelayAgent.ps1
-# Desinstala el agente azbridge del equipo DESTINO.
+# Desinstala el agente Agent-VM-Client del equipo DESTINO.
 # Deshace todo lo que hizo Install-RelayAgent.ps1.
 #
 # Uso:
 #   .\Remove-RelayAgent.ps1
-#   .\Remove-RelayAgent.ps1 -InstallPath "D:\azbridge" -ServiceName "AzRelayBridge"
+#   .\Remove-RelayAgent.ps1 -InstallPath "D:\AgentVMClient" -ServiceName "AgentVMTarget"
 #   .\Remove-RelayAgent.ps1 -KeepBinary    # Solo para el servicio, deja el exe
 # ============================================================
 #Requires -RunAsAdministrator
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$InstallPath = 'C:\azbridge',
-    [string]$ServiceName = 'AzRelayBridge',
+    [string]$InstallPath = 'C:\AgentVMClient',
+    [string]$ServiceName = 'AgentVMTarget',
     [switch]$KeepBinary,
     [switch]$Force
 )
