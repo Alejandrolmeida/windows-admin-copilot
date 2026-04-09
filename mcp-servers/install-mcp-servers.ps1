@@ -87,7 +87,7 @@ Write-Host "pip: $pipVersion" -ForegroundColor Green
 # ----------------------------------------------------------
 # 1. PowerShell.MCP (PSGallery) — instalar o actualizar
 # ----------------------------------------------------------
-Write-Host "`n[1/5] PowerShell.MCP..." -ForegroundColor Yellow
+Write-Host "`n[1/6] PowerShell.MCP..." -ForegroundColor Yellow
 $existingMCP = Get-Module PowerShell.MCP -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
 if (-not $existingMCP) {
     Install-PSResource -Name PowerShell.MCP -Repository PSGallery -Scope AllUsers -TrustRepository
@@ -113,7 +113,7 @@ try {
 # ----------------------------------------------------------
 # 2. win-cli-mcp-server (mhprol fork)
 # ----------------------------------------------------------
-Write-Host "`n[2/5] win-cli-mcp-server..." -ForegroundColor Yellow
+Write-Host "`n[2/6] win-cli-mcp-server..." -ForegroundColor Yellow
 $dest = "$mcpRoot\win-cli-mcp-server"
 if (Test-Path "$dest\.git") {
     Write-Host "Actualizando repositorio existente..." -ForegroundColor Gray
@@ -134,7 +134,7 @@ Write-Host "win-cli-mcp-server OK -> $dest\dist\index.js" -ForegroundColor Green
 # ----------------------------------------------------------
 # 3. windows-admin-mcp (Cosmicjedi)
 # ----------------------------------------------------------
-Write-Host "`n[3/5] windows-admin-mcp..." -ForegroundColor Yellow
+Write-Host "`n[3/6] windows-admin-mcp..." -ForegroundColor Yellow
 $dest = "$mcpRoot\windows-admin-mcp"
 if (Test-Path "$dest\.git") {
     Write-Host "Actualizando repositorio existente..." -ForegroundColor Gray
@@ -215,15 +215,33 @@ if ($configSrc -and (Test-Path $configSrc)) {
         Copy-Item $configDst $backup
         Write-Host "Backup guardado: $backup" -ForegroundColor Gray
     }
-    # Leer template, resolver %USERNAME% con valor fiable
+    # Leer template, resolver variables de entorno Windows (%VAR%) con valores reales.
+    # ConvertFrom-Json NO expande %VAR%, por lo que hay que sustituir antes de parsear.
+    # Los backslashes deben estar doblados para que el JSON resultante sea válido.
     $configContent = Get-Content $configSrc -Raw
     $configContent = $configContent.Replace('%USERNAME%', $script:resolvedUser)
+    $configContent = $configContent.Replace('%APPDATA%', $env:APPDATA.Replace('\', '\\'))
     $config = $configContent | ConvertFrom-Json
 
     # Escribir ruta real de Python en ambos servidores Python
     $config.mcpServers.'windows-admin-mcp'.command  = $script:pythonExe
     $config.mcpServers.'vmware-vsphere-mcp'.command = $script:pythonExe
     Write-Host "Python path: $script:pythonExe" -ForegroundColor Green
+
+    # Resolver path real del servidor memory (npm install -g puede cambiar la ubicación)
+    $npmGlobalModules = (npm root -g 2>$null | Where-Object { $_ -match '\S' } | Select-Object -First 1)
+    if ($npmGlobalModules) { $npmGlobalModules = $npmGlobalModules.Trim() }
+    $memoryJsPath = if ($npmGlobalModules) {
+        Join-Path $npmGlobalModules "@modelcontextprotocol\server-memory\dist\index.js"
+    } else {
+        Join-Path $env:APPDATA "npm\node_modules\@modelcontextprotocol\server-memory\dist\index.js"
+    }
+    if (Test-Path $memoryJsPath) {
+        $config.mcpServers.'memory'.args = @($memoryJsPath)
+        Write-Host "memory path: $memoryJsPath" -ForegroundColor Green
+    } else {
+        Write-Host "AVISO: memory server no encontrado en $memoryJsPath" -ForegroundColor Yellow
+    }
 
     # Actualizar proxy de PowerShell.MCP si se detectó
     if ($script:proxyPath -and (Test-Path $script:proxyPath)) {
