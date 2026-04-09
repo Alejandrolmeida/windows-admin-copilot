@@ -118,26 +118,40 @@ git clone https://github.com/Alejandrolmeida/windows-admin-copilot.git
 cd windows-admin-copilot
 
 # 2. Setup completo en un paso (instala PS7, Node, Python, MCPs)
-.\setup\3-setup-all.ps1
+.\setup\setup.ps1
 ```
 
-El script `3-setup-all.ps1` realiza automáticamente:
+El script `setup.ps1` realiza automáticamente:
 - Instala PowerShell 7 (via winget)
 - Instala Node.js 18 LTS y Python 3.11 (si no están presentes)
 - Instala y configura todos los servidores MCP
 - Copia la configuración MCP a `~/.copilot/mcp-config.json`
 
-### Opción B — Instalación paso a paso
+### Opciones del script de setup
+
+El script unificado acepta una acción como primer parámetro:
+
+| Acción | Descripción |
+|--------|-------------|
+| `all` (default) | Setup completo: herramientas + servidores MCP |
+| `install` | Solo instala PowerShell 7, Copilot CLI y dependencias |
+| `winrm-target` | Configura este equipo como destino WinRM (servidor) |
+| `winrm-client` | Configura este equipo como cliente WinRM |
+| `winrm-cleanup` | Deshace la configuración de cliente WinRM |
 
 ```powershell
-# Paso 1: Instalar PowerShell 7
-.\setup\1-install-powershell7.ps1
+# Solo instalar herramientas (sin MCP)
+.\setup\setup.ps1 -Action install
 
-# Paso 2: Instalar Copilot CLI, Node.js y Python
-.\setup\2-install-copilot-cli.ps1
+# Configurar WinRM en el equipo que recibirá conexiones
+.\setup\setup.ps1 -Action winrm-target -ClientHost "192.168.1.10"
 
-# Paso 3: Instalar servidores MCP
-.\mcp-servers\install-mcp-servers.ps1
+# Configurar WinRM en el equipo cliente y probar conectividad
+.\setup\setup.ps1 -Action winrm-client -RemoteHost "servidor01" -CertPath "C:\winrm-cert-srv01.cer"
+.\setup\setup.ps1 -Action winrm-client -RemoteHost "servidor01" -Test
+
+# Revertir configuración WinRM del cliente
+.\setup\setup.ps1 -Action winrm-cleanup -RemoteHost "servidor01"
 ```
 
 ### Actualización / reparación desde versión anterior
@@ -148,7 +162,7 @@ Las credenciales existentes (Azure, VMware) se detectan y preservan automáticam
 ```powershell
 # Desde la raíz del repositorio
 git pull
-.\mcp-servers\install-mcp-servers.ps1
+.\setup\setup.ps1
 ```
 
 Parámetros opcionales:
@@ -228,12 +242,7 @@ windows-admin-copilot/
 │   └── mcp-config.json                     <- Configuración de servidores MCP
 │
 ├── setup/
-│   ├── 1-install-powershell7.ps1           <- Instala PowerShell 7 vía winget
-│   ├── 2-install-copilot-cli.ps1           <- Instala Node.js, Python, Copilot CLI
-│   ├── 3-setup-all.ps1                     <- Setup completo en un paso
-│   ├── configure-winrm-target.ps1          <- Habilita WinRM en equipo destino
-│   ├── configure-winrm-client.ps1          <- Configura WinRM en cliente (TrustedHosts)
-│   ├── cleanup-winrm-client.ps1            <- Revierte configuración WinRM cliente
+│   ├── setup.ps1                           <- Setup unificado (all / install / winrm-target / winrm-client / winrm-cleanup)
 │   └── agent-vm-client/                    <- Solución de conectividad remota sin VPN
 │       ├── README.md
 │       ├── New-RelayNamespace.ps1/.bat     <- Crea infraestructura Azure Relay
