@@ -140,32 +140,28 @@ El script `3-setup-all.ps1` realiza automáticamente:
 .\mcp-servers\install-mcp-servers.ps1
 ```
 
-### Actualización desde versión anterior
+### Actualización / reparación desde versión anterior
 
-Si ya tienes el entorno instalado y quieres actualizar todo (servidores MCP + configuración):
+El mismo script gestiona instalaciones nuevas, actualizaciones y reparaciones.
+Las credenciales existentes (Azure, VMware) se detectan y preservan automáticamente:
 
 ```powershell
-# 1. Actualizar el repositorio
-cd windows-admin-copilot
+# Desde la raíz del repositorio
 git pull
-
-# 2. Ejecutar el script de actualización completo
-#    Actualiza repos, dependencias y config — preserva tus credenciales
-.\setup\update-mcp-config.ps1
+.\mcp-servers\install-mcp-servers.ps1
 ```
 
-El script `update-mcp-config.ps1` realiza en orden:
-
-| Fase | Acción |
-|------|--------|
-| **0** | Actualiza el módulo `PowerShell.MCP` desde PSGallery |
-| **1** | `git pull` + reinstala dependencias de cada servidor MCP |
-| **2** | Actualiza `mcp-config.json` con rutas reales (Python, proxy) y **preserva** credenciales |
-| **3** | Verifica que todos los ejecutables existan |
-
 Parámetros opcionales:
-- `-ConfigOnly` — solo actualiza el config (omite fases 0 y 1)
-- `-Force` — sobreescribe sin pedir confirmación
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `-ConfigOnly` | Solo regenera `mcp-config.json` (omite git pull y reinstalación de servidores) |
+| `-Force` | Sin confirmaciones interactivas |
+
+```powershell
+# Solo actualizar el config (más rápido si los servidores ya están al día)
+.\mcp-servers\install-mcp-servers.ps1 -ConfigOnly
+```
 
 ### Configurar credenciales
 
@@ -235,7 +231,6 @@ windows-admin-copilot/
 │   ├── 1-install-powershell7.ps1           <- Instala PowerShell 7 vía winget
 │   ├── 2-install-copilot-cli.ps1           <- Instala Node.js, Python, Copilot CLI
 │   ├── 3-setup-all.ps1                     <- Setup completo en un paso
-│   ├── update-mcp-config.ps1               <- Actualiza config MCP preservando credenciales
 │   ├── configure-winrm-target.ps1          <- Habilita WinRM en equipo destino
 │   ├── configure-winrm-client.ps1          <- Configura WinRM en cliente (TrustedHosts)
 │   ├── cleanup-winrm-client.ps1            <- Revierte configuración WinRM cliente
@@ -250,7 +245,7 @@ windows-admin-copilot/
 │       └── Get-VMStatus.ps1/.bat           <- Consulta estado de máquinas
 │
 ├── mcp-servers/
-│   ├── install-mcp-servers.ps1             <- Instala todos los servidores MCP
+│   ├── install-mcp-servers.ps1             <- Instala, actualiza y repara todos los MCP (preserva credenciales)
 │   └── README.md
 │
 ├── docs/

@@ -21,12 +21,21 @@ No requieren MCP dedicado:
 - **VirtualBox** → usar `win-cli-mcp` con `VBoxManage` CLI  
   `VBoxManage list vms`, `VBoxManage startvm`, `VBoxManage snapshot`, etc.
 
-## Instalación
+## Instalación y actualización
 
+El mismo script sirve para primera instalación, actualizaciones y reparaciones.
 Ejecutar como Administrador:
+
 ```powershell
 .\install-mcp-servers.ps1
 ```
+
+Las credenciales existentes (Azure, VMware) se detectan y **preservan automáticamente**.
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `-ConfigOnly` | Solo regenera `mcp-config.json` (omite git pull y reinstalación de servidores) |
+| `-Force` | Sin confirmaciones interactivas |
 
 ## Configuración de credenciales
 
