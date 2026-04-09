@@ -225,27 +225,66 @@ windows-admin-copilot/
 │
 ├── .github/
 │   └── agents/
-│       └── Windows_Infra_Pro.agent.md  <- AGENTE PRINCIPAL
+│       └── Windows_Infra_Pro.agent.md      <- Agente principal (VS Code agent mode)
 │
 ├── .copilot/
-│   ├── copilot-instructions.md          <- Instrucciones legacy (Copilot Chat estándar)
-│   └── mcp-config.json                  <- Configuración de servidores MCP
+│   ├── copilot-instructions.md             <- Instrucciones Copilot Chat estándar
+│   └── mcp-config.json                     <- Configuración de servidores MCP
 │
 ├── setup/
-│   ├── 1-install-powershell7.ps1
-│   ├── 2-install-copilot-cli.ps1
-│   └── 3-setup-all.ps1
+│   ├── 1-install-powershell7.ps1           <- Instala PowerShell 7 vía winget
+│   ├── 2-install-copilot-cli.ps1           <- Instala Node.js, Python, Copilot CLI
+│   ├── 3-setup-all.ps1                     <- Setup completo en un paso
+│   ├── update-mcp-config.ps1               <- Actualiza config MCP preservando credenciales
+│   ├── configure-winrm-target.ps1          <- Habilita WinRM en equipo destino
+│   ├── configure-winrm-client.ps1          <- Configura WinRM en cliente (TrustedHosts)
+│   ├── cleanup-winrm-client.ps1            <- Revierte configuración WinRM cliente
+│   └── agent-vm-client/                    <- Solución de conectividad remota sin VPN
+│       ├── README.md
+│       ├── New-RelayNamespace.ps1/.bat     <- Crea infraestructura Azure Relay
+│       ├── Install-RelayAgent.ps1/.bat     <- Instala agente en equipo remoto
+│       ├── Remove-RelayAgent.ps1/.bat      <- Desinstala agente del equipo remoto
+│       ├── Install-RelayClient.ps1/.bat    <- Instala servicio cliente local
+│       ├── Remove-RelayClient.ps1/.bat     <- Desinstala servicio cliente
+│       ├── Connect-RelaySession.ps1/.bat   <- Abre sesión WinRM remota
+│       └── Get-VMStatus.ps1/.bat           <- Consulta estado de máquinas
 │
 ├── mcp-servers/
-│   ├── install-mcp-servers.ps1
+│   ├── install-mcp-servers.ps1             <- Instala todos los servidores MCP
 │   └── README.md
 │
 ├── docs/
-│   ├── navision-commands.md
-│   └── axapta-commands.md
+│   ├── navision-commands.md                <- Comandos PowerShell para NAV/Business Central
+│   └── axapta-commands.md                  <- Comandos para AX 2012 y D365 F&O
 │
 └── README.md
 ```
+
+---
+
+## Conectividad remota: Agent-VM-Client
+
+Para administrar máquinas remotas donde **no es posible abrir puertos entrantes** (solo RDP disponible), el proyecto incluye la solución **Agent-VM-Client** basada en Azure Relay Hybrid Connections.
+
+```
+Tu PC                        Azure Relay                   Equipo remoto
+─────────────────            ───────────────               ──────────────
+AgentVMClient-<vm>  ─HTTPS►  relay-sre-agent-proxy  ◄────  AgentVMTarget
+(servicio Windows)           Hybrid Connection              (servicio Windows)
+       │
+       ▼
+ localhost:15985
+       │
+Enter-PSSession ─────────────────────────────────────────► WinRM :5985
+```
+
+**Características:**
+- El equipo destino solo necesita **salida HTTPS (443)** — sin cambios de firewall entrante
+- Una única conexión RDP inicial para instalar el agente; después todo vía PowerShell
+- Ambos lados corren como **Windows Service con arranque automático**
+- Consulta de estado de máquinas conectadas/desconectadas en tiempo real
+
+➡️ Ver [setup/agent-vm-client/README.md](setup/agent-vm-client/README.md) para la guía completa.
 
 ---
 
@@ -390,12 +429,14 @@ Plan de rollback: Start-Service "MicrosoftDynamicsNavServer$BC"
 
 ## Documentación de referencia
 
-- [docs/navision-commands.md](docs/navision-commands.md) — Comandos PowerShell para Dynamics NAV/BC
+- [setup/agent-vm-client/README.md](setup/agent-vm-client/README.md) — Conectividad remota sin VPN con Azure Relay
+- [docs/navision-commands.md](docs/navision-commands.md) — Comandos PowerShell para Dynamics NAV/Business Central
 - [docs/axapta-commands.md](docs/axapta-commands.md) — Comandos para AX 2012 y D365 F&O
 - [mcp-servers/README.md](mcp-servers/README.md) — Configuración detallada de cada servidor MCP
 - [Microsoft Learn — Windows Server](https://learn.microsoft.com/windows-server/)
 - [Microsoft Learn — Business Central](https://learn.microsoft.com/dynamics365/business-central/dev-itpro/)
 - [Microsoft Learn — Azure Arc](https://learn.microsoft.com/azure/azure-arc/)
+- [Azure Relay Hybrid Connections](https://learn.microsoft.com/azure/azure-relay/relay-hybrid-connections-protocol)
 
 ---
 
