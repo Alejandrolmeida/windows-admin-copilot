@@ -356,6 +356,16 @@ if ($isFirstInstall) {
     Write-Log "IMPORTANTE: Edita $configPath con tus credenciales de servidores" 'WARN'
 }
 
+# Copiar instrucciones de Copilot CLI al perfil de usuario
+$instrSrc  = Join-Path $repoRoot ".copilot\copilot-instructions.md"
+$instrDest = "$env:USERPROFILE\.copilot\copilot-instructions.md"
+if (Test-Path $instrSrc) {
+    Copy-Item $instrSrc $instrDest -Force
+    Write-Log "copilot-instructions.md copiado a $instrDest" 'OK'
+} else {
+    Write-Log "No se encontro $instrSrc — instrucciones no configuradas" 'WARN'
+}
+
 # ----------------------------------------------------------
 # FASE 8 — Verificación final
 # ----------------------------------------------------------
