@@ -106,7 +106,16 @@ if ($winrmService -and $winrmService.Status -ne 'Running') {
     Set-Service -Name 'WinRM' -StartupType Automatic
     Start-Service -Name 'WinRM'
 }
-Write-Log "WinRM activo" 'OK'
+
+# Habilitar Basic auth y trafico no cifrado (el cifrado lo aporta el tunel Azure Relay)
+Set-Item WSMan:\localhost\Service\Auth\Basic       $true  -Force
+Set-Item WSMan:\localhost\Service\AllowUnencrypted $true  -Force
+# Asegurar que el listener HTTP esta activo en el puerto WinRM del cliente
+$listener = Get-WSManInstance winrm/config/Listener -SelectorSet @{Address='*';Transport='HTTP'} -ErrorAction SilentlyContinue
+if (-not $listener) {
+    New-WSManInstance winrm/config/Listener -SelectorSet @{Address='*';Transport='HTTP'} -ValueSet @{Enabled='True'} | Out-Null
+}
+Write-Log "WinRM configurado (Basic auth + listener HTTP habilitados)" 'OK'
 
 # -------------------------------------------------------
 # 5. Registrar como Scheduled Task (inicio automatico SYSTEM)

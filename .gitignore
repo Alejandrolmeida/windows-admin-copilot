@@ -30,5 +30,8 @@ Thumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 
-# YAML files con connection strings reales (contienen secrets)
+# Archivos generados con secrets de Azure Relay (NO commitear)
 client-*.yml
+server-relay.yml
+server-registry.json
+output/
