@@ -237,10 +237,13 @@ if ($current.mcpServers.'vmware-vsphere-mcp'?.env) {
     if ($hasVmwareCreds) { Write-Log "Credenciales VMware detectadas — se preservaran" 'OK' }
 }
 
-# Cargar template del repo y resolver placeholders
+# Cargar template del repo y resolver placeholders Windows (%VAR%).
+# ConvertFrom-Json NO expande %VAR%, hay que sustituir en el string raw
+# antes de parsear. Los backslashes se doblan para mantener JSON valido.
 $template = Get-Content $repoConfig -Raw
 $template  = $template.Replace('%USERNAME%', $resolvedUser)
-Write-Log "Placeholder %%USERNAME%% resuelto como: $resolvedUser" 'OK'
+$template  = $template.Replace('%APPDATA%', $env:APPDATA.Replace('\', '\\'))
+Write-Log "Placeholders resueltos: %%USERNAME%%=$resolvedUser, %%APPDATA%%=$env:APPDATA" 'OK'
 $newConfig = $template | ConvertFrom-Json
 
 # Restaurar credenciales
@@ -267,6 +270,21 @@ if ($pythonExe) {
     Write-Log "Python detectado y escrito en config: $pythonExe" 'OK'
 } else {
     Write-Log "Python no encontrado. Instala Miniconda3 o Python 3.11+ y vuelve a ejecutar." 'WARN'
+}
+
+# Resolver path real del servidor memory via npm root -g
+$npmGlobalModules = (npm root -g 2>$null | Where-Object { $_ -match '\S' } | Select-Object -First 1)
+if ($npmGlobalModules) { $npmGlobalModules = $npmGlobalModules.Trim() }
+$memoryJsPath = if ($npmGlobalModules) {
+    Join-Path $npmGlobalModules "@modelcontextprotocol\server-memory\dist\index.js"
+} else {
+    Join-Path $env:APPDATA "npm\node_modules\@modelcontextprotocol\server-memory\dist\index.js"
+}
+if (Test-Path $memoryJsPath) {
+    $newConfig.mcpServers.'memory'.args = @($memoryJsPath)
+    Write-Log "memory path resuelto: $memoryJsPath" 'OK'
+} else {
+    Write-Log "memory server no encontrado en $memoryJsPath" 'WARN'
 }
 
 # Actualizar ruta del proxy de PowerShell.MCP
