@@ -1,25 +1,24 @@
 # ============================================================
-# Install-RelayAgent.ps1
-# Instala el agente Agent-VM-Client (azbridge) como Windows Service
-# en el equipo DESTINO (maquina remota del cliente).
-# Ejecutar en el equipo remoto (via RDP, una sola vez).
+# Install-RelayServer.ps1
+# Instala el servidor de administracion Azure Relay en ESTE EQUIPO.
+# Se ejecuta UNA SOLA VEZ. Gestiona todos los clientes registrados
+# a traves de una unica instancia de azbridge.
 #
 # Requisitos:
 #   - Ejecutar como Administrador
-#   - Fichero YAML generado por New-RelayNamespace.ps1
-#   - Acceso a internet saliente HTTPS (443)
+#   - server-relay.yml generado por New-RelayNamespace.ps1
 #
 # Uso:
-#   .\Install-RelayAgent.ps1 -ConfigFile "target-srv01.yml"
-#   .\Install-RelayAgent.ps1 -ConfigFile "target-srv01.yml" -InstallPath "D:\AgentVMClient"
+#   .\Install-RelayServer.ps1 -ConfigFile "server-relay.yml"
+#   .\Install-RelayServer.ps1 -ConfigFile "server-relay.yml" -InstallPath "D:\RelayAdminServer"
 # ============================================================
 #Requires -RunAsAdministrator
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$ConfigFile,
-    [string]$InstallPath = 'C:\AgentVMClient',
-    [string]$ServiceName = 'AgentVMTarget',
+    [string]$InstallPath = 'C:\RelayAdminServer',
+    [string]$ServiceName = 'RelayAdminServer',
     [string]$Version     = '0.16.1'
 )
 
@@ -41,7 +40,7 @@ function Write-Log {
 # -------------------------------------------------------
 if (-not (Test-Path $ConfigFile)) {
     Write-Log "Fichero de configuracion no encontrado: $ConfigFile" 'ERROR'
-    Write-Log "Genera el fichero con New-RelayNamespace.ps1 en tu PC y copia el target-*.yml aqui." 'WARN'
+    Write-Log "Genera el fichero con: .\New-RelayNamespace.ps1 -ResourceGroup <rg> -Namespace <ns>" 'WARN'
     exit 1
 }
 $ConfigFile = (Resolve-Path $ConfigFile).Path
@@ -82,57 +81,65 @@ Copy-Item $ConfigFile $destConfig -Force
 Write-Log "Config copiada a $destConfig" 'OK'
 
 # -------------------------------------------------------
-# 4. Registrar como Windows Service
+# 4. Registrar como Scheduled Task (inicio automatico SYSTEM)
 # -------------------------------------------------------
-$existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-if ($existing) {
-    Write-Log "Servicio '$ServiceName' ya existe. Deteniendolo para actualizar..." 'WARN'
-    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-    sc.exe delete $ServiceName | Out-Null
-    Start-Sleep -Seconds 2
+Write-Log "Registrando tarea programada '$ServiceName'..."
+
+$existingTask = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+if ($existingTask) {
+    Write-Log "Tarea '$ServiceName' ya existe. Actualizando..." 'WARN'
+    Stop-ScheduledTask  -TaskName $ServiceName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false
 }
 
-$binPath = "`"$exePath`" -f `"$destConfig`""
-New-Service -Name $ServiceName `
-    -BinaryPathName $binPath `
-    -DisplayName 'Agent-VM-Client Target (WinRM Relay)' `
-    -Description 'Agente Agent-VM-Client: tunel inverso Azure Relay para acceso WinRM remoto sin puertos entrantes.' `
-    -StartupType Automatic | Out-Null
+$action    = New-ScheduledTaskAction -Execute $exePath -Argument "-f `"$destConfig`"" -WorkingDirectory $InstallPath
+$trigger   = New-ScheduledTaskTrigger -AtStartup
+$settings  = New-ScheduledTaskSettingsSet `
+    -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+    -RestartCount 5 `
+    -RestartInterval (New-TimeSpan -Minutes 1) `
+    -StartWhenAvailable `
+    -MultipleInstances IgnoreNew
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
-Write-Log "Servicio '$ServiceName' registrado" 'OK'
+Register-ScheduledTask -TaskName $ServiceName `
+    -Action $action -Trigger $trigger `
+    -Settings $settings -Principal $principal `
+    -Description 'Azure Relay Admin Server: proxy de administracion para todos los clientes registrados.' | Out-Null
+
+Write-Log "Tarea '$ServiceName' registrada (inicio automatico al arrancar, SYSTEM)" 'OK'
 
 # -------------------------------------------------------
-# 5. Arrancar el servicio
+# 5. Arrancar la tarea ahora
 # -------------------------------------------------------
-Write-Log "Arrancando servicio..."
-Start-Service -Name $ServiceName
-Start-Sleep -Seconds 3
+Write-Log "Arrancando tarea '$ServiceName'..."
+Start-ScheduledTask -TaskName $ServiceName
+Start-Sleep -Seconds 5
 
-$svc = Get-Service -Name $ServiceName
-if ($svc.Status -eq 'Running') {
-    Write-Log "Servicio corriendo correctamente" 'OK'
+$task = Get-ScheduledTask    -TaskName $ServiceName
+$info = Get-ScheduledTaskInfo -TaskName $ServiceName
+if ($task.State -eq 'Running') {
+    Write-Log "Servidor corriendo correctamente" 'OK'
 } else {
-    Write-Log "El servicio no arranco (estado: $($svc.Status)). Revisa el Event Viewer." 'ERROR'
-    Write-Log "Log: Get-EventLog -LogName Application -Source '$ServiceName' -Newest 10" 'WARN'
-    exit 1
+    Write-Log "Estado: $($task.State) | LastResult: $($info.LastTaskResult)" 'WARN'
 }
 
 # -------------------------------------------------------
 # 6. Resumen
 # -------------------------------------------------------
-Write-Host "`n========== INSTALACION COMPLETADA ==========" -ForegroundColor Green
+Write-Host "`n========== SERVIDOR INSTALADO ==========" -ForegroundColor Green
 Write-Host @"
-  Servicio : $ServiceName ($($svc.Status))
+  Tarea    : $ServiceName ($($task.State))
   Binario  : $exePath
   Config   : $destConfig
-  Inicio   : Automatico (arranca con Windows)
+  Inicio   : Automatico al arrancar Windows (SYSTEM)
 
-  Para verificar estado:
-    Get-Service $ServiceName
-  Para ver logs:
-    Get-EventLog -LogName Application -Source '$ServiceName' -Newest 20
-  Para desinstalar:
-    .\Remove-RelayAgent.ps1
-  Para consultar estado de todas las maquinas:
+  Para registrar un nuevo cliente (en el servidor):
+    .\Add-RelayClient.ps1 -ResourceGroup <rg> -Namespace <ns> -MachineName "pc-nuevo"
+
+  Para ver estado de los clientes:
     .\Get-VMStatus.ps1 -ResourceGroup <rg> -Namespace <ns>
+
+  Para desinstalar el servidor:
+    .\Remove-RelayServer.ps1
 "@ -ForegroundColor Cyan

@@ -1,143 +1,180 @@
-# Agent-VM-Client
+# Azure Relay - Administración Remota Windows
 
-Solución de conectividad remota WinRM sin necesidad de abrir puertos entrantes en el equipo destino. Utiliza **Azure Relay Hybrid Connections** como proxy inverso: el agente en el destino hace una conexión saliente HTTPS (puerto 443) a Azure, y el cliente se conecta a través del mismo relay.
+Solución de conectividad remota WinRM **sin abrir puertos entrantes** en los equipos gestionados. Utiliza **Azure Relay Hybrid Connections** como proxy inverso: los clientes abren una conexión saliente HTTPS (puerto 443) a Azure, y el servidor de administración se conecta a través del mismo relay.
 
 ## Arquitectura
 
 ```
-Tu PC (cliente)                   Azure Relay                   Equipo remoto (destino)
-─────────────────                 ───────────────               ────────────────────────
-AgentVMClient-<vm>  ──HTTPS 443─► relay-sre-agent-proxy ◄──── AgentVMTarget
-(servicio Windows)                Hybrid Connection              (servicio Windows)
-     │
-     ▼
-localhost:15985
-     │
-Enter-PSSession ──────────────────────────────────────────────► WinRM (5985)
+SERVIDOR DE ADMINISTRACION             AZURE RELAY                EQUIPO CLIENTE (gestionado)
+────────────────────────────           ────────────────           ───────────────────────────
+RelayAdminServer                       Namespace (1 instancia)
+azbridge -f server-relay.yml
+  LocalForward:
+    - RelayName: winrm-pc-juan  ──Send──► HC: winrm-pc-juan  ◄──Listen── RelayClient
+      BindPort: 15985                                                      azbridge -f client-pc-juan.yml
+    - RelayName: winrm-srv-contab ──Send─► HC: winrm-srv-contab             RemoteForward → WinRM:5985
+      BindPort: 15986
+         │
+         ▼
+  localhost:15985 / localhost:15986
+         │
+  Enter-PSSession ──────────────────────────────────────────────────────► WinRM (5985)
 ```
 
-**Flujo:**
-1. El agente destino (`AgentVMTarget`) abre túnel saliente HTTPS a Azure Relay
-2. El servicio cliente (`AgentVMClient-<vm>`) expone `localhost:15985` y lo tuneliza por Azure
-3. `Connect-RelaySession.ps1` abre una PSSession a `localhost:15985`
+**Principios clave:**
+- El servidor corre **UN SOLO proceso** azbridge con múltiples `LocalForward` (uno por cliente)
+- Los clientes usan una SAS key individual con permiso `Listen` por Hybrid Connection
+- El servidor usa una SAS key a nivel de **namespace** con permiso `Send` (alcanza todas las HCs)
+- Añadir un cliente NO requiere reinstalar el servidor → solo reiniciar su tarea programada
 
 ## Scripts disponibles
 
-| Script | Donde ejecutar | Descripcion |
-|--------|---------------|-------------|
-| `New-RelayNamespace.ps1` | Tu PC | Crea el namespace Azure Relay + Hybrid Connections + configs YAML |
-| `Install-RelayAgent.ps1` | Equipo remoto (Admin) | Instala `AgentVMTarget` como servicio Windows con arranque automatico |
-| `Remove-RelayAgent.ps1` | Equipo remoto (Admin) | Desinstala el agente del equipo remoto |
-| `Install-RelayClient.ps1` | Tu PC (Admin) | Instala `AgentVMClient-<vm>` como servicio Windows con arranque automatico |
-| `Remove-RelayClient.ps1` | Tu PC (Admin) | Desinstala el servicio cliente |
-| `Connect-RelaySession.ps1` | Tu PC | Abre sesion WinRM remota (usa el servicio si esta instalado) |
-| `Get-VMStatus.ps1` | Tu PC | Lista todas las maquinas registradas con estado conectado/desconectado |
+### Servidor de administración (ejecutar en el equipo admin)
 
-## Instalacion paso a paso
+| Script | Descripción |
+|--------|-------------|
+| `New-RelayNamespace.ps1` | Crea/valida el namespace Azure Relay. Genera `server-relay.yml` + `server-registry.json`. **Una sola vez.** |
+| `Install-RelayServer.ps1` | Instala azbridge como tarea `RelayAdminServer` (SYSTEM, inicio automático). **Una sola vez.** |
+| `Add-RelayClient.ps1` | Registra un nuevo cliente: crea HC, genera `client-<nombre>.yml`, actualiza config del servidor. **Una vez por cliente.** |
+| `Connect-RelaySession.ps1` | Abre sesión WinRM interactiva o ejecuta comandos en un cliente. |
+| `Get-VMStatus.ps1` | Lista todos los clientes con estado conectado/desconectado. |
+| `Remove-RelayServer.ps1` | Desinstala el servidor de administración (no toca Azure). |
 
-### 1. Crear infraestructura Azure (una vez por cliente)
+### Equipo cliente (ejecutar en cada equipo gestionado)
+
+| Script | Descripción |
+|--------|-------------|
+| `Register-RelayClient.ps1` | Instala azbridge como tarea `RelayClient` (SYSTEM, inicio automático). Recibe el YAML generado por `Add-RelayClient.ps1`. |
+| `Remove-RelayClient.ps1` | Desinstala el agente del equipo cliente. |
+
+## Flujo de instalación
+
+### Paso 1 — Crear el namespace (una sola vez)
 
 ```powershell
-# En tu PC, con az login activo
+# En el servidor de administración, con az login activo
 .\New-RelayNamespace.ps1 `
-    -ResourceGroup "rg-sre-agent-proxy" `
-    -Namespace     "relay-sre-agent-proxy" `
-    -Machines      "srv01","srv02","srv03" `
-    -OutputPath    "C:\relay-configs"
+    -ResourceGroup "rg-relay" `
+    -Namespace     "relay-empresa" `
+    -Location      "westeurope"
 ```
 
-Genera por cada maquina:
-- `target-srv01.yml` → copiar al equipo remoto
-- `client-srv01.yml` → usar en tu PC
+Genera en el directorio actual:
+- `server-relay.yml` — config del servidor (SAS namespace-level + LocalForwards)
+- `server-registry.json` — registro de clientes con metadatos de puertos
 
-### 2. Instalar agente en el equipo remoto (via RDP, una sola vez)
+### Paso 2 — Instalar el servidor (una sola vez)
 
 ```powershell
-# En el equipo remoto, como Administrador
-.\Install-RelayAgent.ps1 -ConfigFile "target-srv01.yml"
+# En el servidor de administración, como Administrador
+.\Install-RelayServer.ps1 -ConfigFile "server-relay.yml"
 ```
 
-Instala el servicio `AgentVMTarget` con inicio automático. A partir de aquí, el equipo nunca más necesita RDP.
+Instala la tarea `RelayAdminServer` con inicio automático al arrancar Windows (SYSTEM).
 
-### 3. Instalar servicio cliente en tu PC (recomendado)
+### Paso 3 — Registrar cada cliente
 
 ```powershell
-# En tu PC, como Administrador
-.\Install-RelayClient.ps1 -ConfigFile "C:\relay-configs\client-srv01.yml"
-# Para una segunda maquina en puerto diferente:
-.\Install-RelayClient.ps1 -ConfigFile "C:\relay-configs\client-srv02.yml" -LocalPort 15986
+# En el servidor de administración (por cada nuevo equipo a gestionar)
+.\Add-RelayClient.ps1 `
+    -ResourceGroup "rg-relay" `
+    -Namespace     "relay-empresa" `
+    -MachineName   "pc-juan"
 ```
 
-Instala `AgentVMClient-srv01` con inicio automático. El proxy siempre estará disponible tras reiniciar.
+Esto:
+1. Crea la Hybrid Connection `winrm-pc-juan` en Azure Relay
+2. Genera `client-pc-juan.yml` con la SAS key Listen
+3. Actualiza `server-relay.yml` con el nuevo `LocalForward` en puerto 15985 (o el siguiente disponible)
+4. Reinicia la tarea `RelayAdminServer` si está instalada
 
-### 4. Conectarse
+### Paso 4 — Instalar el agente en el equipo cliente
 
 ```powershell
-# Sesion interactiva
-.\Connect-RelaySession.ps1 -ConfigFile "client-srv01.yml" -Username "DOMINIO\admin"
-
-# Ejecutar comando remoto
-.\Connect-RelaySession.ps1 -ConfigFile "client-srv01.yml" -Username "admin" -Command "Get-Service"
+# Copia client-pc-juan.yml al equipo cliente (por USB, share, etc.)
+# En el equipo cliente, como Administrador
+.\Register-RelayClient.ps1 -ConfigFile "client-pc-juan.yml"
 ```
 
-### 5. Consultar estado de maquinas
+A partir de este momento, el equipo cliente se conecta a Azure Relay automáticamente al arrancar. No necesita ningún acceso entrante.
+
+### Conectarse
 
 ```powershell
-.\Get-VMStatus.ps1 -ResourceGroup "rg-sre-agent-proxy" -Namespace "relay-sre-agent-proxy"
+# Sesión interactiva
+.\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "DOMINIO\admin"
+
+# Ejecutar un comando remoto
+.\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "admin" -Command "Get-Service"
+```
+
+### Ver estado de todos los clientes
+
+```powershell
+.\Get-VMStatus.ps1 -ResourceGroup "rg-relay" -Namespace "relay-empresa"
 ```
 
 Salida ejemplo:
 ```
-Estado        Maquina  Listeners  HybridConn    Creado
-------        -------  ---------  ----------    ------
-[OK] Conectado    srv01        1  winrm-srv01   2026-04-09 08:00
-[--] Desconectado srv02        0  winrm-srv02   2026-04-09 08:00
-[OK] Conectado    srv03        1  winrm-srv03   2026-04-09 08:00
+========== ESTADO DE MAQUINAS REMOTAS ==========
+  Namespace : relay-empresa
+  Fecha     : 2026-06-01 09:30:00
 
-Resumen: 2 conectadas | 1 desconectadas | 3 total
+Estado         Maquina      Listeners  HybridConn         Creado
+------         -------      ---------  ----------         ------
+[OK] Conectado pc-juan              1  winrm-pc-juan      2026-05-28 10:00
+[OK] Conectado srv-contab           1  winrm-srv-contab   2026-05-29 14:00
+[--] Desconect pc-maria             0  winrm-pc-maria     2026-05-30 09:00
+
+  Resumen: 2 conectadas | 1 desconectadas | 3 total
 ```
 
-## Desinstalacion
+## Archivos generados
+
+| Archivo | Ubicación | Descripción |
+|---------|-----------|-------------|
+| `server-relay.yml` | Servidor | Config azbridge del servidor. Gestionado automáticamente. |
+| `server-registry.json` | Servidor | Registro JSON de todos los clientes con nombre, HC, puerto asignado. |
+| `client-<nombre>.yml` | Servidor (copiar a cliente) | Config azbridge del cliente individual. SAS Listen por HC. |
+
+## Tareas programadas creadas
+
+| Tarea | Equipo | Descripción |
+|-------|--------|-------------|
+| `RelayAdminServer` | Servidor de administración | Proceso azbridge con todos los LocalForwards. SYSTEM, inicio automático. |
+| `RelayClient` | Cada equipo cliente | Proceso azbridge con RemoteForward → WinRM. SYSTEM, inicio automático. |
+
+## Desinstalación
 
 ```powershell
-# Desinstalar servicio cliente de una maquina
-.\Remove-RelayClient.ps1 -MachineName "srv01"
+# En el servidor de administración
+.\Remove-RelayServer.ps1
 
-# Desinstalar todos los servicios cliente
-.\Remove-RelayClient.ps1 -All
-
-# Desinstalar agente del equipo remoto
-.\Remove-RelayAgent.ps1
+# En el equipo cliente
+.\Remove-RelayClient.ps1
 ```
-
-## Servicios Windows creados
-
-| Servicio | Donde | Descripcion |
-|----------|-------|-------------|
-| `AgentVMTarget` | Equipo remoto | Abre túnel saliente a Azure Relay |
-| `AgentVMClient-<vm>` | Tu PC | Expone localhost:15985 → Azure Relay |
-
-Ambos tienen `StartupType = Automatic` → sobreviven reinicios.
 
 ## Costes Azure Relay
 
-| Escenario | Coste/mes |
-|-----------|-----------|
-| 1 maquina, 24/7 | ~$9.5 |
-| 5 maquinas, 24/7 | ~$47.5 |
-| 20 maquinas, 8h/dia laboral | ~$33.3 |
+| Escenario | Coste/mes (estimado) |
+|-----------|----------------------|
+| 1 cliente, 24/7 | ~$10 |
+| 5 clientes, 24/7 | ~$15 |
+| 20 clientes, 8h/día laboral | ~$35 |
 
-Basado en $0.013/hora por Hybrid Connection activa. El primer GB de datos al mes es gratuito.
+- Namespace: ~$0.10/hora
+- Por Hybrid Connection activa: ~$0.013/hora
+- El primer GB de datos al mes es gratuito
 
 ## Seguridad
 
 | Elemento | Configuración |
 |----------|--------------|
-| Token destino | SAS con permiso `Listen` únicamente (no puede enviar) |
-| Token cliente | SAS con permiso `Send` únicamente (no puede escuchar) |
+| SAS servidor | Permiso `Send` a nivel namespace (alcanza todas las HCs) |
+| SAS cliente | Permiso `Listen` individual por Hybrid Connection |
 | Transporte | TLS 1.2+ end-to-end a través de Azure |
-| Firewall destino | Solo salida a `*.servicebus.windows.net:443` — sin reglas entrantes |
-| Rotación de tokens | `az relay hyco authorization-rule keys renew` |
+| Firewall cliente | Solo salida a `*.servicebus.windows.net:443` — sin reglas entrantes |
+| Rotación de tokens | `az relay namespace authorization-rule keys renew` |
 
 ## Requisitos
 
@@ -145,13 +182,14 @@ Basado en $0.013/hora por Hybrid Connection activa. El primer GB de datos al mes
 - Suscripción Azure activa
 - [Azure CLI](https://aka.ms/installazurecliwindows) instalado y `az login` ejecutado
 
-### Equipo remoto (destino)
-- Windows 10 / Server 2016 o superior
-- PowerShell 5.0+
+### Servidor de administración
+- Windows 10/11 / Server 2016+ con PowerShell 5.0+
+- Acceso saliente HTTPS (443)
+- Permisos de Administrador
+
+### Equipos cliente (gestionados)
+- Windows 10/11 / Server 2016+ con PowerShell 5.0+
+- WinRM habilitado (el script lo configura automáticamente)
 - Acceso saliente HTTPS (443) — sin cambios de firewall entrante
 - Permisos de Administrador para la instalación inicial
 
-### Tu PC (cliente)
-- PowerShell 5.0+
-- Acceso saliente HTTPS (443)
-- Permisos de Administrador para instalar el servicio cliente (opcional)

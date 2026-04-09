@@ -57,7 +57,7 @@ $hcs = az relay hyco list `
 
 if (-not $hcs -or $hcs.Count -eq 0) {
     Write-Log "No se encontraron Hybrid Connections en '$Namespace'." 'WARN'
-    Write-Log "Crea maquinas con: .\New-RelayNamespace.ps1 -Machines 'srv01','srv02'" 'INFO'
+    Write-Log "Crea clientes con: .\Add-RelayClient.ps1 -ResourceGroup <rg> -Namespace <ns> -MachineName <nombre>" 'INFO'
     exit 0
 }
 
@@ -95,7 +95,7 @@ foreach ($hc in $hcs) {
 # -------------------------------------------------------
 if ($results.Count -eq 0) {
     Write-Log "No hay maquinas registradas (con prefijo winrm-). Usa -ShowAll para ver todas." 'WARN'
-    exit 0
+    Write-Log "Registra clientes con: .\Add-RelayClient.ps1 -ResourceGroup <rg> -Namespace <ns> -MachineName <nombre>" 'INFO'
 }
 
 $connected    = ($results | Where-Object { $_.Listeners -gt 0 }).Count

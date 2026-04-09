@@ -29,3 +29,6 @@ venv/
 Thumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+
+# YAML files con connection strings reales (contienen secrets)
+client-*.yml

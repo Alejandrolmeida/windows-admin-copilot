@@ -1,25 +1,25 @@
 # ============================================================
 # New-RelayNamespace.ps1
-# Crea el Azure Relay Namespace + Hybrid Connections + SAS tokens
-# para exponer WinRM de una o varias maquinas remotas.
+# Crea o valida el Azure Relay Namespace y genera los archivos
+# de configuracion del servidor (server-relay.yml, server-registry.json).
+# Se ejecuta UNA SOLA VEZ por entorno.
+#
+# Los clientes se agregan posteriormente con Add-RelayClient.ps1.
 #
 # Requisitos:
 #   - Azure CLI (az) instalado y autenticado (az login)
 #   - Permisos de Contributor en la suscripcion / resource group
 #
 # Uso:
-#   .\New-RelayNamespace.ps1 -ResourceGroup "rg-relay" -Location "westeurope" `
-#       -Namespace "relay-cliente01" -Machines "srv01","srv02","srv03"
-#
-#   .\New-RelayNamespace.ps1 -ResourceGroup "rg-relay" -Namespace "relay-cliente01" `
-#       -Machines "srv01" -OutputPath "C:\relay-configs"
+#   .\New-RelayNamespace.ps1 -ResourceGroup "rg-relay" -Namespace "relay-empresa"
+#   .\New-RelayNamespace.ps1 -ResourceGroup "rg-relay" -Namespace "relay-empresa" -CreateResourceGroup -Location "westeurope"
+#   .\New-RelayNamespace.ps1 -ResourceGroup "rg-relay" -Namespace "relay-empresa" -OutputPath "C:\relay-configs"
 # ============================================================
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$ResourceGroup,
     [Parameter(Mandatory)][string]$Namespace,
-    [Parameter(Mandatory)][string[]]$Machines,
     [string]$Location   = 'westeurope',
     [string]$OutputPath = '.',
     [switch]$CreateResourceGroup
@@ -86,123 +86,97 @@ if ($existing) {
 }
 
 # -------------------------------------------------------
-# 3. Hybrid Connection + SAS keys por maquina
+# 3. SAS rule a nivel de namespace para el servidor (Send a todas las HCs)
 # -------------------------------------------------------
-$OutputPath = Resolve-Path $OutputPath -ErrorAction SilentlyContinue
-if (-not $OutputPath) { $OutputPath = $PWD.Path }
+Write-Log "Configurando SAS key 'send-all-clients' a nivel namespace..."
+az relay namespace authorization-rule create `
+    --resource-group $ResourceGroup `
+    --namespace-name $Namespace `
+    --name 'send-all-clients' `
+    --rights Send `
+    --output none 2>$null
 
-$summary = @()
+$nsKeys = az relay namespace authorization-rule keys list `
+    --resource-group $ResourceGroup `
+    --namespace-name $Namespace `
+    --name 'send-all-clients' | ConvertFrom-Json
 
-foreach ($machine in $Machines) {
-    $hcName = "winrm-$($machine.ToLower())"
-    Write-Log "Procesando Hybrid Connection '$hcName' para '$machine'..."
+Write-Log "SAS key 'send-all-clients' lista" 'OK'
 
-    # Crear Hybrid Connection
-    $hc = az relay hyco show `
-        --resource-group $ResourceGroup `
-        --namespace-name $Namespace `
-        --name $hcName 2>$null | ConvertFrom-Json
+# -------------------------------------------------------
+# 4. Obtener endpoint del namespace
+# -------------------------------------------------------
+$nsDetails = az relay namespace show `
+    --resource-group $ResourceGroup `
+    --name $Namespace | ConvertFrom-Json
+$nsEndpoint = "sb://$($nsDetails.serviceBusEndpoint -replace 'https?://|/$','')"
 
-    if (-not $hc) {
-        az relay hyco create `
-            --resource-group $ResourceGroup `
-            --namespace-name $Namespace `
-            --name $hcName `
-            --requires-client-authorization true `
-            --output none
-        Write-Log "  Hybrid Connection '$hcName' creada" 'OK'
-    } else {
-        Write-Log "  Hybrid Connection '$hcName' ya existe, reutilizando" 'WARN'
-    }
+# -------------------------------------------------------
+# 5. Generar server-relay.yml + server-registry.json
+# -------------------------------------------------------
+$outDir = if ($OutputPath -eq '.') { $PWD.Path } else { $OutputPath }
+New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
-    # SAS rule para el TARGET (Listen)
-    $listenRule = "listen-$($machine.ToLower())"
-    az relay hyco authorization-rule create `
-        --resource-group $ResourceGroup `
-        --namespace-name $Namespace `
-        --hybrid-connection-name $hcName `
-        --name $listenRule `
-        --rights Listen `
-        --output none 2>$null
+$serverYmlPath      = Join-Path $outDir 'server-relay.yml'
+$serverRegistryPath = Join-Path $outDir 'server-registry.json'
 
-    $listenKeys = az relay hyco authorization-rule keys list `
-        --resource-group $ResourceGroup `
-        --namespace-name $Namespace `
-        --hybrid-connection-name $hcName `
-        --name $listenRule | ConvertFrom-Json
-
-    # SAS rule para el CLIENTE (Send)
-    $sendRule = "send-$($machine.ToLower())"
-    az relay hyco authorization-rule create `
-        --resource-group $ResourceGroup `
-        --namespace-name $Namespace `
-        --hybrid-connection-name $hcName `
-        --name $sendRule `
-        --rights Send `
-        --output none 2>$null
-
-    $sendKeys = az relay hyco authorization-rule keys list `
-        --resource-group $ResourceGroup `
-        --namespace-name $Namespace `
-        --hybrid-connection-name $hcName `
-        --name $sendRule | ConvertFrom-Json
-
-    # Generar config YAML para el TARGET
-    $targetConfig = @"
-# azbridge config para TARGET: $machine
-# Generado: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
-AzureRelayConnectionString: "$($listenKeys.primaryConnectionString)"
-RemoteForward:
-  - RelayName: "$hcName"
-    HostName: localhost
-    HostPort: 5985
-"@
-
-    # Generar config YAML para el CLIENTE
-    $clientConfig = @"
-# azbridge config para CLIENTE -> $machine
-# Generado: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
-AzureRelayConnectionString: "$($sendKeys.primaryConnectionString)"
-LocalForward:
-  - RelayName: "$hcName"
-    BindAddress: localhost
-    BindPort: 15985
-"@
-
-    $targetFile = Join-Path $OutputPath "target-$($machine.ToLower()).yml"
-    $clientFile = Join-Path $OutputPath "client-$($machine.ToLower()).yml"
-
-    $targetConfig | Set-Content -Path $targetFile -Encoding UTF8
-    $clientConfig | Set-Content -Path $clientFile -Encoding UTF8
-
-    Write-Log "  Config target  -> $targetFile" 'OK'
-    Write-Log "  Config cliente -> $clientFile" 'OK'
-
-    $summary += [PSCustomObject]@{
-        Machine    = $machine
-        HybridConn = $hcName
-        TargetYml  = $targetFile
-        ClientYml  = $clientFile
-    }
+# Si ya existe el registry, respetar los clientes existentes
+$existingRegistry = $null
+if (Test-Path $serverRegistryPath) {
+    $existingRegistry = Get-Content $serverRegistryPath -Raw | ConvertFrom-Json
+    Write-Log "server-registry.json existente detectado ($($existingRegistry.clients.Count) clientes)" 'WARN'
 }
 
-# -------------------------------------------------------
-# 4. Resumen
-# -------------------------------------------------------
-Write-Host "`n========== RESUMEN ==========" -ForegroundColor Cyan
-$summary | Format-Table -AutoSize
+$existingClients = if ($existingRegistry) { $existingRegistry.clients } else { @() }
 
+# Reconstruir server-relay.yml con todos los clientes existentes
+$localForwardLines = $existingClients | ForEach-Object {
+    "  - RelayName: `"$($_.relayName)`"`n    BindAddress: localhost`n    BindPort: $($_.bindPort)"
+}
+$localForwardBlock = if ($localForwardLines) { $localForwardLines -join "`n" } else { "[]" }
+
+$serverYml = @"
+# Azure Relay - Config del Servidor de Administracion
+# Namespace: $Namespace
+# Generado: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
+# GESTIONADO AUTOMATICAMENTE por Add-RelayClient.ps1 -- NO editar manualmente
+#
+AzureRelayConnectionString: "$($nsKeys.primaryConnectionString)"
+LocalForward:
+$localForwardBlock
+"@
+$serverYml | Set-Content -Path $serverYmlPath -Encoding UTF8
+Write-Log "server-relay.yml generado -> $serverYmlPath" 'OK'
+
+$registry = [PSCustomObject]@{
+    namespace   = $Namespace
+    resourceGroup = $ResourceGroup
+    endpoint    = $nsEndpoint
+    generatedAt = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    clients     = $existingClients
+}
+$registry | ConvertTo-Json -Depth 5 | Set-Content -Path $serverRegistryPath -Encoding UTF8
+Write-Log "server-registry.json generado -> $serverRegistryPath" 'OK'
+
+# -------------------------------------------------------
+# 6. Resumen
+# -------------------------------------------------------
+Write-Host "`n========== NAMESPACE LISTO ==========" -ForegroundColor Green
 Write-Host @"
+  Namespace : $Namespace
+  Endpoint  : $nsEndpoint
+  Config    : $serverYmlPath
+  Registry  : $serverRegistryPath
+  Clientes  : $($existingClients.Count) registrados
 
-PROXIMOS PASOS:
-  1. Copia target-<maquina>.yml al equipo remoto y ejecuta (como Admin):
-       .\Install-RelayAgent.ps1 -ConfigFile "target-<maquina>.yml"
+  PROXIMOS PASOS:
+    1. Instalar el servidor de administracion (UNA VEZ, en este equipo):
+         .\Install-RelayServer.ps1 -ConfigFile "server-relay.yml"
 
-  2. En tu PC, para conectarte:
-       .\Connect-RelaySession.ps1 -ConfigFile "client-<maquina>.yml" -Username "DOMINIO\usuario"
+    2. Registrar cada cliente (por cada equipo gestionado):
+         .\Add-RelayClient.ps1 -ResourceGroup "$ResourceGroup" -Namespace "$Namespace" -MachineName "pc-juan"
 
-COSTE ESTIMADO Azure Relay:
-  - Por Hybrid Connection activa: ~$0.013/hora
-  - $($Machines.Count) maquinas 24/7: ~$($([math]::Round($Machines.Count * 0.013 * 730, 2)))/mes
-  - $($Machines.Count) maquinas 8h/dia laboral: ~$($([math]::Round($Machines.Count * 0.013 * 160, 2)))/mes
-"@ -ForegroundColor Yellow
+  COSTE ESTIMADO Azure Relay:
+    - Por Hybrid Connection activa: ~`$0.013/hora
+    - Por namespace: ~`$0.10/hora
+"@ -ForegroundColor Cyan

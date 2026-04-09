@@ -1,6 +1,7 @@
 @echo off
-:: Desinstala el cliente proxy (AgentVMClient-<maquina> o todos con -All)
-:: Requiere ejecutar como Administrador
+:: Remove-RelayClient.bat
+:: Desinstala el agente Azure Relay de ESTE equipo cliente.
+:: Requiere ejecutar como Administrador.
 net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo ERROR: Este script requiere permisos de Administrador.

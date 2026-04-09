@@ -1,22 +1,20 @@
 # ============================================================
-# Remove-RelayClient.ps1
-# Desinstala el agente Azure Relay de ESTE EQUIPO CLIENTE.
-# Ejecutar en el equipo CLIENTE (managed machine).
-# Deshace todo lo que hizo Register-RelayClient.ps1.
+# Remove-RelayServer.ps1
+# Desinstala el servidor de administracion Azure Relay de ESTE EQUIPO.
+# NO elimina nada en Azure.
 #
 # Requisitos:
 #   - Ejecutar como Administrador
 #
 # Uso:
-#   .\Remove-RelayClient.ps1
-#   .\Remove-RelayClient.ps1 -InstallPath "D:\RelayClient"
+#   .\Remove-RelayServer.ps1
 # ============================================================
 #Requires -RunAsAdministrator
 
 [CmdletBinding()]
 param(
-    [string]$InstallPath = 'C:\RelayClient',
-    [string]$ServiceName = 'RelayClient'
+    [string]$InstallPath = 'C:\RelayAdminServer',
+    [string]$ServiceName = 'RelayAdminServer'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -58,6 +56,6 @@ if (Test-Path $InstallPath) {
     Write-Log "Directorio '$InstallPath' no encontrado" 'WARN'
 }
 
-Write-Log "Agente cliente desinstalado correctamente" 'OK'
-Write-Host "`nNOTA: Para eliminar este cliente del servidor, ejecuta en el servidor:" -ForegroundColor Yellow
-Write-Host "      Edita server-registry.json y server-relay.yml manualmente o vuelve a registrar con Add-RelayClient.ps1" -ForegroundColor Yellow
+Write-Log "Servidor de administracion desinstalado correctamente" 'OK'
+Write-Host "`nNOTA: server-relay.yml y server-registry.json NO han sido eliminados." -ForegroundColor Yellow
+Write-Host "      Reinstala con: .\Install-RelayServer.ps1 -ConfigFile server-relay.yml" -ForegroundColor Yellow
