@@ -167,7 +167,7 @@ $newClient = [PSCustomObject]@{
     winrmPort    = $WinRMPort
     addedAt      = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 }
-$clients = [System.Collections.ArrayList]@($registry.clients)
+$clients = [System.Collections.ArrayList]@($registry.clients | Where-Object { $_ -ne $null })
 $clients.Add($newClient) | Out-Null
 $registry.clients = $clients.ToArray()
 $registry | ConvertTo-Json -Depth 5 | Set-Content -Path $ServerRegistryFile -Encoding UTF8

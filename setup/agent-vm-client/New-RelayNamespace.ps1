@@ -127,7 +127,9 @@ if (Test-Path $serverRegistryPath) {
     Write-Log "server-registry.json existente detectado ($($existingRegistry.clients.Count) clientes)" 'WARN'
 }
 
-$existingClients = if ($existingRegistry) { $existingRegistry.clients } else { @() }
+$existingClients = if ($existingRegistry) { 
+    @($existingRegistry.clients | Where-Object { $_ -ne $null })
+} else { @() }
 
 # Reconstruir server-relay.yml con todos los clientes existentes
 $localForwardLines = $existingClients | ForEach-Object {

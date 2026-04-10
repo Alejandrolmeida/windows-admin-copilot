@@ -99,7 +99,9 @@ $settings  = New-ScheduledTaskSettingsSet `
     -RestartCount 5 `
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -StartWhenAvailable `
-    -MultipleInstances IgnoreNew
+    -MultipleInstances IgnoreNew `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 
 Register-ScheduledTask -TaskName $ServiceName `
