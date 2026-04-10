@@ -243,15 +243,17 @@ windows-admin-copilot/
 │
 ├── setup/
 │   ├── setup.ps1                           <- Setup unificado (all / install / winrm-target / winrm-client / winrm-cleanup)
-│   └── agent-vm-client/                    <- Solución de conectividad remota sin VPN
-│       ├── README.md
-│       ├── New-RelayNamespace.ps1/.bat     <- Crea infraestructura Azure Relay
-│       ├── Install-RelayAgent.ps1/.bat     <- Instala agente en equipo remoto
-│       ├── Remove-RelayAgent.ps1/.bat      <- Desinstala agente del equipo remoto
-│       ├── Install-RelayClient.ps1/.bat    <- Instala servicio cliente local
-│       ├── Remove-RelayClient.ps1/.bat     <- Desinstala servicio cliente
-│       ├── Connect-RelaySession.ps1/.bat   <- Abre sesión WinRM remota
-│       └── Get-VMStatus.ps1/.bat           <- Consulta estado de máquinas
+│   └── agent-vm-client/                    <- Conectividad remota sin VPN via Azure Relay
+│       ├── README.md                       <- Guía completa + Quickstart
+│       ├── New-RelayNamespace.ps1          <- [Servidor] Crea namespace Relay en Azure (1 vez)
+│       ├── Install-RelayServer.ps1         <- [Servidor] Instala tarea RelayAdminServer (1 vez)
+│       ├── Add-RelayClient.ps1             <- [Servidor] Registra nuevo cliente en el Relay
+│       ├── Register-RelayClient.ps1        <- [Cliente]  Instala tarea RelayClient en el equipo gestionado
+│       ├── Connect-RelaySession.ps1        <- [Servidor] Abre sesión WinRM remota via Relay
+│       ├── Get-RelayStatus.ps1             <- [Servidor] Estado de túneles (local, sin az login)
+│       ├── Get-VMStatus.ps1                <- [Servidor] Estado de listeners en Azure (requiere az login)
+│       ├── Remove-RelayServer.ps1          <- [Servidor] Desinstala el servidor local
+│       └── Remove-RelayClient.ps1         <- [Cliente]  Desinstala el agente del equipo gestionado
 │
 ├── mcp-servers/
 │   ├── install-mcp-servers.ps1             <- Instala, actualiza y repara todos los MCP (preserva credenciales)
@@ -268,27 +270,35 @@ windows-admin-copilot/
 
 ## Conectividad remota: Agent-VM-Client
 
-Para administrar máquinas remotas donde **no es posible abrir puertos entrantes** (solo RDP disponible), el proyecto incluye la solución **Agent-VM-Client** basada en Azure Relay Hybrid Connections.
+Para administrar máquinas remotas donde **no es posible abrir puertos entrantes**, el proyecto incluye la solución **Agent-VM-Client** basada en Azure Relay Hybrid Connections.
 
 ```
-Tu PC                        Azure Relay                   Equipo remoto
-─────────────────            ───────────────               ──────────────
-AgentVMClient-<vm>  ─HTTPS►  relay-sre-agent-proxy  ◄────  AgentVMTarget
-(servicio Windows)           Hybrid Connection              (servicio Windows)
+Servidor Admin                  Azure Relay                Equipo Cliente (sin IP pública)
+──────────────                  ───────────                ───────────────────────────────
+RelayAdminServer   ──Send──►  HC: winrm-pc-juan  ◄──Listen──  RelayClient
+(azbridge local)              HC: winrm-srv-01   ◄──Listen──  RelayClient
        │
        ▼
- localhost:15985
-       │
-Enter-PSSession ─────────────────────────────────────────► WinRM :5985
+  hosts: 127.0.0.2 pc-juan
+  Enter-PSSession -ComputerName pc-juan -Port 15985  ──────►  WinRM
 ```
 
 **Características:**
-- El equipo destino solo necesita **salida HTTPS (443)** — sin cambios de firewall entrante
-- Una única conexión RDP inicial para instalar el agente; después todo vía PowerShell
-- Ambos lados corren como **Windows Service con arranque automático**
-- Consulta de estado de máquinas conectadas/desconectadas en tiempo real
+- Los clientes solo necesitan **salida HTTPS (443)** — cero cambios de firewall entrante
+- Un único namespace Relay para **N clientes** (arquitectura 1-servidor, N-clientes)
+- Ambos lados corren como **tarea programada SYSTEM con arranque automático**
+- Script de estado (`Get-RelayStatus.ps1`) sin dependencias externas
 
-➡️ Ver [setup/agent-vm-client/README.md](setup/agent-vm-client/README.md) para la guía completa.
+**Quickstart en 5 pasos:**
+```powershell
+.\New-RelayNamespace.ps1  -ResourceGroup "rg-relay" -Namespace "relay-empresa" -Location "westeurope"
+.\Install-RelayServer.ps1 -ConfigFile ".\server-relay.yml"
+.\Add-RelayClient.ps1     -ResourceGroup "rg-relay" -Namespace "relay-empresa" -MachineName "pc-juan"
+# (en el cliente) .\Register-RelayClient.ps1 -ConfigFile "client-pc-juan.yml"
+.\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "admin"
+```
+
+➡️ Ver [setup/agent-vm-client/README.md](setup/agent-vm-client/README.md) para la guía completa con arquitectura, ejemplos y referencia de scripts.
 
 ---
 
