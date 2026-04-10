@@ -3,6 +3,10 @@
 *.env.*
 secrets.json
 
+# Carpeta de configuración local — credenciales, relay keys, registros de servidores
+# NUNCA commitear — contiene passwords y connection strings
+.config/
+
 # Contraseñas en config local
 mcp-config.local.json
 

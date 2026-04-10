@@ -258,3 +258,96 @@ Write-Host "Reboot Pending: $reboot"
 - Hyper-V: vía `powershell-mcp` con módulo `Hyper-V` nativo de Windows Server
 - VirtualBox: vía `win-cli-mcp` con `VBoxManage` CLI
 
+---
+
+## Arquitectura Azure Relay Hybrid Connections
+
+Este proyecto usa **Azure Relay Hybrid Connections** para conectar con servidores remotos sin abrir puertos en el firewall.
+
+```
+[Copilot CLI / Agente]
+        │
+        │  WinRM → 127.0.0.x:15985 (loopback)
+        ▼
+[azbridge (cliente local)]
+        │
+        │  TLS/443 → Azure Relay Namespace
+        ▼
+[relay-plenergy.servicebus.windows.net]
+        │
+        │  Hybrid Connection
+        ▼
+[azbridge (servidor remoto)]
+        │
+        │  WinRM → localhost:5985
+        ▼
+[Servidor Windows remoto]
+```
+
+### Constantes de Proyecto
+
+```powershell
+$WINCOPILOT_ROOT   = "C:\Users\A.almeida\source\repos\alejandrolmeida\windows-admin-copilot"
+$WINCOPILOT_CFG    = "$WINCOPILOT_ROOT\.config"          # Credenciales y config local (gitignored)
+$WINCOPILOT_RELAY  = "$WINCOPILOT_ROOT\setup\agent-vm-client"  # Scripts de relay
+$WINCOPILOT_CREDS  = "$WINCOPILOT_CFG\credentials.json"
+$WINCOPILOT_REG    = "$WINCOPILOT_CFG\server-registry.json"
+```
+
+### Árbol de Decisión para Conectar a un Servidor
+
+1. **¿Está el relay activo?** → `Get-RelayStatus.ps1 -ConfigPath "$WINCOPILOT_CFG"`
+2. **¿Está el servidor registrado?** → Leer `$WINCOPILOT_REG`, buscar `name == servidor`
+3. **¿Hay credenciales?** → Leer `$WINCOPILOT_CREDS`, buscar `name == servidor`
+4. **Preparar WinRM local:**
+   ```powershell
+   $localAddr = "127.0.0.2"   # del server-registry.json
+   Set-Item WSMan:\localhost\Client\TrustedHosts -Value $localAddr -Force
+   ```
+5. **Crear PSSession:**
+   ```powershell
+   $cred = New-Object PSCredential("prod3", (ConvertTo-SecureString "***REDACTED***" -AsPlainText -Force))
+   $so   = New-PSSessionOption -SkipCACheck -SkipCNCheck
+   $sess = New-PSSession -ComputerName 127.0.0.2 -Port 15985 -Credential $cred `
+                         -Authentication Basic -SessionOption $so
+   ```
+
+### Playbook Relay — Operaciones Comunes
+
+| Operación | Comando |
+|-----------|---------|
+| Ver estado del relay | `& "$WINCOPILOT_RELAY\Get-RelayStatus.ps1" -ConfigPath "$WINCOPILOT_CFG"` |
+| Registrar cliente relay | `& "$WINCOPILOT_RELAY\Register-RelayClient.ps1" -ConfigFile "$WINCOPILOT_CFG\client-srvplenoilfs.yml"` |
+| Conectar sesión PS | Ver árbol de decisión paso 5 |
+| Ver VMs del servidor | `& "$WINCOPILOT_RELAY\Get-VMStatus.ps1" -ConfigPath "$WINCOPILOT_CFG"` |
+| Añadir nuevo servidor | `& "$WINCOPILOT_RELAY\Add-RelayClient.ps1" -ServerName "nuevo" -ConfigPath "$WINCOPILOT_CFG"` |
+
+---
+
+## Carpeta `.config\` — Configuración Local (Gitignored)
+
+> ⚠️ Esta carpeta está en `.gitignore`. **NUNCA** hacer commit de su contenido.
+
+Ubicación: `<repo-root>\.config\`
+
+| Fichero | Contenido |
+|---------|-----------|
+| `credentials.json` | Usuarios, passwords y opciones WinRM por servidor |
+| `server-registry.json` | Registro de servidores y puertos relay |
+| `server-relay.yml` | Config azbridge del lado agente (connection string send) |
+| `client-<nombre>.yml` | Config azbridge del lado servidor remoto (connection string listen) |
+
+### Servidores Registrados
+
+| Servidor | Relay | Dirección Local | Puerto | Usuario |
+|----------|-------|-----------------|--------|---------|
+| `srvplenoilfs` | `winrm-srvplenoilfs` | `127.0.0.2` | `15985` | `prod3` |
+
+### Reglas de Comportamiento del Agente
+
+1. **Rutas absolutas siempre**: usar `$WINCOPILOT_CFG` nunca rutas relativas
+2. **Leer credenciales de `.config\credentials.json`** — no hardcodear en scripts
+3. **Antes de conectar**: verificar que el relay esté activo con `Get-RelayStatus.ps1`
+4. **TrustedHosts**: añadir `127.0.0.x` antes de `New-PSSession` con autenticación Basic
+5. **Al añadir servidor nuevo**: actualizar `credentials.json` Y `server-registry.json`
+
