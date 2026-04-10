@@ -123,6 +123,26 @@ function Refresh-Path {
                 [System.Environment]::GetEnvironmentVariable('PATH', 'User')
 }
 
+function Find-PythonExe {
+    $candidates = @(
+        "$env:USERPROFILE\miniconda3\python.exe",
+        "$env:USERPROFILE\miniconda3\envs\base\python.exe",
+        "$env:USERPROFILE\anaconda3\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+        "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+        "C:\Python313\python.exe",
+        "C:\Python312\python.exe",
+        "C:\Python311\python.exe"
+    )
+    foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
+    $pyCmd = Get-Command python -EA SilentlyContinue
+    if ($pyCmd -and $pyCmd.Source -notlike '*WindowsApps*') {
+        if ((& $pyCmd.Source --version 2>&1) -match 'Python \d') { return $pyCmd.Source }
+    }
+    return $null
+}
+
 # ================================================================
 # ACCION: install  (PowerShell 7 + Copilot CLI + dependencias)
 # ================================================================
@@ -134,9 +154,37 @@ function Invoke-Install {
     Write-Host '  Windows Admin Copilot - Instalacion' -ForegroundColor Cyan
     Write-Host '========================================' -ForegroundColor Cyan
 
-    # --- PowerShell 7 ---
+    # --- [1/3] Python ---
     Write-Host ''
-    Write-Host '[1/2] Instalando PowerShell 7...' -ForegroundColor Yellow
+    Write-Host '[1/3] Comprobando Python...' -ForegroundColor Yellow
+
+    $pythonExe = Find-PythonExe
+    if (-not $pythonExe) {
+        Write-Log 'Python no encontrado. Instalando Miniconda3...' 'WARN'
+        winget install --id Anaconda.Miniconda3 --silent --accept-source-agreements --accept-package-agreements
+        Refresh-Path
+        $pythonExe = Find-PythonExe
+    }
+
+    if (-not $pythonExe) {
+        Write-Log 'Miniconda3 no disponible. Intentando Python 3.13...' 'WARN'
+        winget install --id Python.Python.3.13 --silent --accept-source-agreements --accept-package-agreements
+        Refresh-Path
+        $pythonExe = Find-PythonExe
+    }
+
+    if ($pythonExe) {
+        Write-Log "Python: $pythonExe ($( & $pythonExe --version 2>&1))" 'OK'
+        & $pythonExe -m ensurepip --upgrade 2>&1 | Out-Null
+        & $pythonExe -m pip install --upgrade pip --quiet
+        Write-Log "pip: $( & $pythonExe -m pip --version 2>&1)" 'OK'
+    } else {
+        Write-Log 'No se pudo instalar Python. Los servidores MCP que lo requieren no funcionaran.' 'ERROR'
+    }
+
+    # --- [2/3] PowerShell 7 ---
+    Write-Host ''
+    Write-Host '[2/3] Instalando PowerShell 7...' -ForegroundColor Yellow
 
     if (Get-Command winget -EA SilentlyContinue) {
         winget install --id Microsoft.PowerShell --silent --accept-source-agreements --accept-package-agreements
@@ -154,9 +202,9 @@ function Invoke-Install {
         Write-Log 'Reinicia la terminal y verifica con: pwsh --version' 'WARN'
     }
 
-    # --- Copilot CLI y dependencias ---
+    # --- [3/3] Copilot CLI y dependencias ---
     Write-Host ''
-    Write-Host '[2/2] Instalando Copilot CLI y dependencias...' -ForegroundColor Yellow
+    Write-Host '[3/3] Instalando Copilot CLI, Node.js y Git...' -ForegroundColor Yellow
 
     if (-not (Get-Command node -EA SilentlyContinue)) {
         Write-Log 'Instalando Node.js...' 'WARN'
@@ -168,28 +216,6 @@ function Invoke-Install {
         winget install --id Git.Git --silent --accept-source-agreements --accept-package-agreements
     }
 
-    # Python — evita el stub del Windows Store
-    $pythonExe = @(
-        "$env:USERPROFILE\miniconda3\python.exe",
-        "$env:USERPROFILE\anaconda3\python.exe",
-        "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
-        "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
-        "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-    if (-not $pythonExe) {
-        $pyCmd = Get-Command python -EA SilentlyContinue
-        if ($pyCmd -and $pyCmd.Source -notlike '*WindowsApps*') {
-            $v = & $pyCmd.Source --version 2>&1
-            if ($v -match 'Python \d') { $pythonExe = $pyCmd.Source }
-        }
-    }
-
-    if (-not $pythonExe) {
-        Write-Log 'Instalando Miniconda3...' 'WARN'
-        winget install --id Anaconda.Miniconda3 --silent --accept-source-agreements --accept-package-agreements
-    }
-
     Write-Log 'Instalando GitHub Copilot CLI...' 'INFO'
     winget install --id GitHub.Copilot --silent --accept-source-agreements --accept-package-agreements
 
@@ -197,9 +223,9 @@ function Invoke-Install {
 
     Write-Host ''
     Write-Host '=== Verificacion ===' -ForegroundColor Cyan
+    Write-Host "Python  : $( if ($pythonExe) { & $pythonExe --version 2>&1 } else { 'NO ENCONTRADO' })"
     Write-Host "Node.js : $(node  --version 2>&1)"
     Write-Host "Git     : $(git   --version 2>&1)"
-    Write-Host "Python  : $(python --version 2>&1)"
     Write-Host "Copilot : $(copilot --version 2>&1)"
     Write-Host ''
     Write-Log "Ejecuta 'copilot' y usa /login para autenticarte con GitHub" 'OK'
@@ -219,7 +245,7 @@ function Invoke-SetupAll {
     Invoke-Install
 
     Write-Host ''
-    Write-Host '[3/3] Configurando servidores MCP...' -ForegroundColor Yellow
+    Write-Host '[+] Configurando servidores MCP...' -ForegroundColor Yellow
 
     $mcpScript = Join-Path $script:Root '..\mcp-servers\install-mcp-servers.ps1'
     if (Test-Path $mcpScript) {
