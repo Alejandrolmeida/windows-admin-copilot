@@ -52,6 +52,15 @@
       }
     },
 
+    "github-mcp-server": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "description": "GitHub MCP - Acceso a repositorios, issues, PRs, ramas, commits y búsqueda de código.",
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": ""
+      }
+    },
+
     "memory": {
       "command": "node",
       "args": ["%APPDATA%\\npm\\node_modules\\@modelcontextprotocol\\server-memory\\dist\\index.js"],
