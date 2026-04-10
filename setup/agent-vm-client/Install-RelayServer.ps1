@@ -16,13 +16,16 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$ConfigFile,
+    [string]$ConfigPath  = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) '.config'),
+    [string]$ConfigFile  = '',
     [string]$InstallPath = 'C:\RelayAdminServer',
     [string]$ServiceName = 'RelayAdminServer',
     [string]$Version     = '0.16.1'
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $ConfigFile) { $ConfigFile = Join-Path $ConfigPath 'server-relay.yml' }
 
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
@@ -88,7 +91,9 @@ Write-Log "Registrando tarea programada '$ServiceName'..."
 $existingTask = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
 if ($existingTask) {
     Write-Log "Tarea '$ServiceName' ya existe. Actualizando..." 'WARN'
-    Stop-ScheduledTask  -TaskName $ServiceName -ErrorAction SilentlyContinue
+    if ($existingTask.State -eq 'Running') {
+        Stop-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+    }
     Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false
 }
 

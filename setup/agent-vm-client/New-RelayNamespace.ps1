@@ -21,7 +21,8 @@ param(
     [Parameter(Mandatory)][string]$ResourceGroup,
     [Parameter(Mandatory)][string]$Namespace,
     [string]$Location   = 'westeurope',
-    [string]$OutputPath = '.',
+    [string]$ConfigPath = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) '.config'),
+    [string]$OutputPath = '',
     [switch]$CreateResourceGroup
 )
 
@@ -114,7 +115,7 @@ $nsEndpoint = "sb://$($nsDetails.serviceBusEndpoint -replace 'https?://|/$','')"
 # -------------------------------------------------------
 # 5. Generar server-relay.yml + server-registry.json
 # -------------------------------------------------------
-$outDir = if ($OutputPath -eq '.') { $PWD.Path } else { $OutputPath }
+$outDir = if ($OutputPath) { $OutputPath } else { $ConfigPath }
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
 $serverYmlPath      = Join-Path $outDir 'server-relay.yml'

@@ -21,14 +21,18 @@ param(
     [Parameter(Mandatory)][string]$MachineName,
     [int]   $WinRMPort          = 5985,
     [int]   $BasePort           = 15985,
-    [string]$ServerConfigFile   = '.\server-relay.yml',
-    [string]$ServerRegistryFile = '.\server-registry.json',
-    [string]$OutputPath         = '.',
+    [string]$ConfigPath         = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) '.config'),
+    [string]$ServerConfigFile   = '',
+    [string]$ServerRegistryFile = '',
+    [string]$OutputPath         = '',
     [string]$ServerInstallPath  = 'C:\RelayAdminServer',
     [string]$ServerTaskName     = 'RelayAdminServer'
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $ServerConfigFile)   { $ServerConfigFile   = Join-Path $ConfigPath 'server-relay.yml' }
+if (-not $ServerRegistryFile) { $ServerRegistryFile = Join-Path $ConfigPath 'server-registry.json' }
 
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
@@ -138,7 +142,7 @@ Write-Log "Puerto asignado: $bindPort | Dirección loopback: $localAddress" 'OK'
 # -------------------------------------------------------
 # 5. Generar YAML para el cliente
 # -------------------------------------------------------
-$outDir = if ($OutputPath -eq '.') { Split-Path $ServerConfigFile } else { $OutputPath }
+$outDir = if ($OutputPath) { $OutputPath } else { $ConfigPath }
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 $clientYmlPath = Join-Path $outDir "client-$machineLower.yml"
 

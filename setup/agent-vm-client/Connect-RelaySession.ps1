@@ -22,7 +22,8 @@ param(
     [Parameter(Mandatory)][string]$MachineName,
     [Parameter(Mandatory)][string]$Username,
     [int]   $LocalPort      = 0,
-    [string]$RegistryFile   = '.\server-registry.json',
+    [string]$ConfigPath     = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) '.config'),
+    [string]$RegistryFile   = '',
     [string]$ServerTaskName = 'RelayAdminServer',
     [string]$Command,
     [string]$Password,
@@ -31,7 +32,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Write-Log {
+if (-not $RegistryFile) { $RegistryFile = Join-Path $ConfigPath 'server-registry.json' }
     param([string]$Message, [string]$Level = 'INFO')
     $color = switch ($Level) {
         'OK'    { 'Green'  }

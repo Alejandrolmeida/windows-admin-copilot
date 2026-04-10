@@ -13,12 +13,15 @@
 
 [CmdletBinding()]
 param(
-    [string]$RegistryFile   = '.\server-registry.json',
+    [string]$ConfigPath     = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) '.config'),
+    [string]$RegistryFile   = '',
     [string]$ServerTaskName = 'RelayAdminServer',
     [switch]$ShowListeners
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
+
+if (-not $RegistryFile) { $RegistryFile = Join-Path $ConfigPath 'server-registry.json' }
 
 # -------------------------------------------------------
 # Colores y helpers
