@@ -93,9 +93,19 @@ Copy-Item $ConfigFile $destConfig -Force
 Write-Log "Config copiada a $destConfig" 'OK'
 
 # -------------------------------------------------------
-# 4. Asegurar que WinRM esta habilitado y escuchando
+# 4. Leer puerto de destino del YAML (HostPort = puerto WinRM del cliente)
 # -------------------------------------------------------
-Write-Log "Configurando WinRM..."
+$yamlContent = Get-Content $destConfig -Raw
+$targetPort  = 5985   # valor por defecto
+if ($yamlContent -match 'HostPort:\s*(\d+)') {
+    $targetPort = [int]$Matches[1]
+}
+Write-Log "Puerto WinRM destino (HostPort): $targetPort" 'OK'
+
+# -------------------------------------------------------
+# 5. Asegurar que WinRM esta habilitado en el puerto correcto
+# -------------------------------------------------------
+Write-Log "Configurando WinRM en puerto $targetPort..."
 $wmResult = winrm qc /quiet 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Log "winrm qc devolvio: $wmResult" 'WARN'
@@ -110,17 +120,57 @@ if ($winrmService -and $winrmService.Status -ne 'Running') {
 # Habilitar Basic auth y trafico no cifrado (el cifrado lo aporta el tunel Azure Relay)
 Set-Item WSMan:\localhost\Service\Auth\Basic       $true  -Force
 Set-Item WSMan:\localhost\Service\AllowUnencrypted $true  -Force
-# Asegurar que el listener HTTP esta activo en el puerto WinRM del cliente
-$listener = Get-WSManInstance winrm/config/Listener -SelectorSet @{Address='*';Transport='HTTP'} -ErrorAction SilentlyContinue
-if (-not $listener) {
-    New-WSManInstance winrm/config/Listener -SelectorSet @{Address='*';Transport='HTTP'} -ValueSet @{Enabled='True'} | Out-Null
+
+# Reubicar el listener HTTP al puerto que espera el servidor (HostPort del YAML)
+$existingListener = Get-ChildItem WSMan:\localhost\Listener | Where-Object {
+    (Get-ChildItem $_.PSPath | Where-Object { $_.Name -eq 'Transport' }).Value -eq 'HTTP'
 }
-Write-Log "WinRM configurado (Basic auth + listener HTTP habilitados)" 'OK'
+$currentPort = if ($existingListener) {
+    [int](Get-ChildItem $existingListener.PSPath | Where-Object { $_.Name -eq 'Port' }).Value
+} else { 0 }
+
+if ($currentPort -ne $targetPort) {
+    Write-Log "Cambiando WinRM del puerto $currentPort al $targetPort..."
+    if ($existingListener) {
+        Remove-Item -Path $existingListener.PSPath -Recurse -Force
+    }
+    New-Item -Path WSMan:\localhost\Listener -Transport HTTP -Address * -Port $targetPort -Force | Out-Null
+    Restart-Service WinRM -Force
+    Start-Sleep -Seconds 3
+    Write-Log "WinRM configurado en puerto $targetPort" 'OK'
+} else {
+    Write-Log "WinRM ya esta en el puerto correcto ($targetPort)" 'OK'
+}
+
+# Añadir regla de firewall para el puerto WinRM
+New-NetFirewallRule -Name "WINRM-$targetPort" -DisplayName "WinRM $targetPort (Azure Relay)" `
+    -Protocol TCP -LocalPort $targetPort -Direction Inbound -Action Allow -Enabled True `
+    -ErrorAction SilentlyContinue | Out-Null
+Write-Log "Regla de firewall para puerto $targetPort OK" 'OK'
 
 # -------------------------------------------------------
-# 5. Registrar como Scheduled Task (inicio automatico SYSTEM)
+# 6. Registrar como Scheduled Task (inicio automatico SYSTEM)
+# Usa argumentos CLI en lugar de YAML para compatibilidad con azbridge v0.16.1
 # -------------------------------------------------------
 Write-Log "Registrando tarea programada '$ServiceName'..."
+
+# Extraer connection string del YAML para los argumentos CLI
+$connStr = if ($yamlContent -match "AzureRelayConnectionString:\s*[`"']?([^`"'\n]+)[`"']?") {
+    $Matches[1].Trim()
+} else { '' }
+
+$relayName = if ($yamlContent -match 'RelayName:\s*[''"]?([^''"#\n]+)[''"]?') {
+    $Matches[1].Trim()
+} else { '' }
+
+if (-not $connStr -or -not $relayName) {
+    Write-Log "No se pudo extraer la conexion del YAML. Usando modo -f <config>" 'WARN'
+    $taskArgs = "-f `"$destConfig`""
+} else {
+    # Modo CLI: -x <connStr> -T <relayName>:localhost:<targetPort>
+    $taskArgs = "-x `"$connStr`" -T `"${relayName}:localhost:${targetPort}`""
+    Write-Log "Modo CLI: -T ${relayName}:localhost:${targetPort}" 'OK'
+}
 
 $existingTask = Get-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
 if ($existingTask) {
@@ -129,7 +179,7 @@ if ($existingTask) {
     Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false
 }
 
-$action    = New-ScheduledTaskAction -Execute $exePath -Argument "-f `"$destConfig`"" -WorkingDirectory $InstallPath
+$action    = New-ScheduledTaskAction -Execute $exePath -Argument $taskArgs -WorkingDirectory $InstallPath
 $trigger   = New-ScheduledTaskTrigger -AtStartup
 $settings  = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
@@ -159,19 +209,26 @@ if ($task.State -eq 'Running') {
     Write-Log "Cliente Relay corriendo correctamente" 'OK'
 } else {
     Write-Log "Estado: $($task.State) | LastResult: $($info.LastTaskResult)" 'WARN'
+    Write-Log "Intentando verificar proceso azbridge..." 'INFO'
+    Start-Sleep -Seconds 3
+    $azbridgeProc = Get-Process azbridge -ErrorAction SilentlyContinue
+    if ($azbridgeProc) {
+        Write-Log "azbridge corriendo (PID=$($azbridgeProc.Id)). Tarea Ready es comportamiento normal." 'OK'
+    }
 }
 
 # -------------------------------------------------------
-# 7. Resumen
+# 8. Resumen
 # -------------------------------------------------------
 Write-Host "`n========== CLIENTE RELAY REGISTRADO ==========" -ForegroundColor Green
 Write-Host @"
-  Tarea    : $ServiceName ($($task.State))
-  Binario  : $exePath
-  Config   : $destConfig
-  Inicio   : Automatico al arrancar Windows (SYSTEM)
+  Tarea      : $ServiceName ($($task.State))
+  Binario    : $exePath
+  Config     : $destConfig
+  WinRM      : puerto $targetPort
+  Inicio     : Automatico al arrancar Windows (SYSTEM)
 
-  Este equipo expone WinRM a traves de Azure Relay.
+  Este equipo expone WinRM en puerto $targetPort a traves de Azure Relay.
   El servidor de administracion puede conectar con:
     .\Connect-RelaySession.ps1 -MachineName "<nombre>" -Username "<usuario>"
 

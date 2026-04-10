@@ -82,19 +82,34 @@ if ($LocalPort -eq 0) {
     }
     $LocalPort = $client.bindPort
     Write-Log "Puerto asignado para '$machineLower': $LocalPort" 'OK'
+    $localAddress = $client.localAddress
 } else {
     Write-Log "Usando puerto manual: $LocalPort" 'WARN'
+    $localAddress = ''
+}
+
+# Asegurar que el hostname del cliente esta en el archivo hosts
+if ($localAddress) {
+    $hostsFile    = "$env:SystemRoot\System32\drivers\etc\hosts"
+    $hostsContent = Get-Content $hostsFile -Raw -ErrorAction SilentlyContinue
+    if ($hostsContent -notmatch [regex]::Escape($machineLower)) {
+        Add-Content -Path $hostsFile -Value "`n$localAddress`t$machineLower" -Encoding ASCII
+        Write-Log "Hosts: añadida entrada '$localAddress $machineLower'" 'OK'
+    }
 }
 
 # -------------------------------------------------------
 # 2. Verificar que el puerto esta escuchando
 # -------------------------------------------------------
-Write-Log "Verificando puerto localhost:$LocalPort..."
+Write-Log "Verificando puerto $machineLower:$LocalPort..."
 $maxWait   = 15
 $connected = $false
+$targetHost = if ($localAddress) { $machineLower } else { 'localhost' }
 for ($i = 0; $i -lt $maxWait; $i++) {
-    $listener = netstat -an 2>$null | Select-String "127.0.0.1:$LocalPort.*LISTEN"
-    if ($listener) { $connected = $true; break }
+    try {
+        $tcpTest = Test-NetConnection -ComputerName $targetHost -Port $LocalPort -InformationLevel Quiet -ErrorAction SilentlyContinue -WarningAction SilentlyContinue
+        if ($tcpTest) { $connected = $true; break }
+    } catch {}
     if ($i -eq 0) { Write-Host "Esperando tunel" -NoNewline }
     Write-Host "." -NoNewline
     Start-Sleep -Seconds 1
@@ -102,12 +117,12 @@ for ($i = 0; $i -lt $maxWait; $i++) {
 Write-Host ""
 
 if (-not $connected) {
-    Write-Log "El puerto $LocalPort no esta escuchando." 'ERROR'
+    Write-Log "El puerto $LocalPort no esta escuchando en $targetHost." 'ERROR'
     Write-Log "Comprueba que el cliente '$machineLower' tiene Register-RelayClient.ps1 instalado y corriendo." 'WARN'
     Write-Log "Estado de todos los clientes: .\Get-VMStatus.ps1 -ResourceGroup <rg> -Namespace <ns>" 'WARN'
     exit 1
 }
-Write-Log "Tunel activo en localhost:$LocalPort -> $machineLower" 'OK'
+Write-Log "Tunel activo: $targetHost:$LocalPort -> Azure Relay -> $machineLower" 'OK'
 
 # -------------------------------------------------------
 # 3. Abrir sesion WinRM a traves del tunel
@@ -117,16 +132,16 @@ try {
 
     if ($Command) {
         Write-Log "Ejecutando comando remoto en '$machineLower': $Command"
-        $result = Invoke-Command -ComputerName localhost -Port $LocalPort `
+        $result = Invoke-Command -ComputerName $targetHost -Port $LocalPort `
             -Credential $cred `
             -Authentication Basic `
             -UseSSL:$false `
             -ScriptBlock ([ScriptBlock]::Create($Command))
         $result
     } elseif (-not $NoSession) {
-        Write-Log "Abriendo sesion interactiva en '$machineLower'..." 'OK'
+        Write-Log "Abriendo sesion interactiva en '$machineLower' ($targetHost:$LocalPort)..." 'OK'
         Write-Host "  Para salir escribe: exit`n" -ForegroundColor Yellow
-        Enter-PSSession -ComputerName localhost -Port $LocalPort `
+        Enter-PSSession -ComputerName $targetHost -Port $LocalPort `
             -Credential $cred `
             -Authentication Basic
     }

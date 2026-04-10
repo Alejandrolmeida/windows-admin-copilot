@@ -122,7 +122,21 @@ $listenKeys = az relay hyco authorization-rule keys list `
 Write-Log "Clave Listen generada para '$machineLower'" 'OK'
 
 # -------------------------------------------------------
-# 4. Generar YAML para el cliente
+# 4. Calcular puerto local y dirección loopback única
+# -------------------------------------------------------
+$usedPorts     = @($registry.clients | ForEach-Object { $_.bindPort })
+$bindPort      = $BasePort
+while ($usedPorts -contains $bindPort) { $bindPort++ }
+
+$usedAddresses = @($registry.clients | ForEach-Object { $_.localAddress } | Where-Object { $_ })
+$loopbackIndex = 2
+while ($usedAddresses -contains "127.0.0.$loopbackIndex") { $loopbackIndex++ }
+$localAddress  = "127.0.0.$loopbackIndex"
+
+Write-Log "Puerto asignado: $bindPort | Dirección loopback: $localAddress" 'OK'
+
+# -------------------------------------------------------
+# 5. Generar YAML para el cliente
 # -------------------------------------------------------
 $outDir = if ($OutputPath -eq '.') { Split-Path $ServerConfigFile } else { $OutputPath }
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
@@ -131,30 +145,27 @@ $clientYmlPath = Join-Path $outDir "client-$machineLower.yml"
 $clientYml = @"
 # azbridge config para CLIENTE: $MachineName
 # Generado: $(Get-Date -Format 'yyyy-MM-dd HH:mm')
+# Puerto WinRM del cliente (debe coincidir con BindPort del servidor): $bindPort
 # Ejecutar en el equipo cliente con: .\Register-RelayClient.ps1 -ConfigFile "client-$machineLower.yml"
 AzureRelayConnectionString: "$($listenKeys.primaryConnectionString)"
 RemoteForward:
   - RelayName: "$hcName"
-    Host: localhost
-    HostPort: $WinRMPort
+    Host: "localhost"
+    HostPort: $bindPort
 "@
 $clientYml | Set-Content -Path $clientYmlPath -Encoding UTF8
 Write-Log "YAML cliente generado -> $clientYmlPath" 'OK'
 
 # -------------------------------------------------------
-# 5. Calcular puerto local y actualizar server-registry.json
+# 6. Actualizar server-registry.json
 # -------------------------------------------------------
-$usedPorts = @($registry.clients | ForEach-Object { $_.bindPort })
-$bindPort  = $BasePort
-while ($usedPorts -contains $bindPort) { $bindPort++ }
-Write-Log "Puerto asignado para '$machineLower': $bindPort" 'OK'
-
 $newClient = [PSCustomObject]@{
-    name      = $machineLower
-    relayName = $hcName
-    bindPort  = $bindPort
-    winrmPort = $WinRMPort
-    addedAt   = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    name         = $machineLower
+    relayName    = $hcName
+    bindPort     = $bindPort
+    localAddress = $localAddress
+    winrmPort    = $WinRMPort
+    addedAt      = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 }
 $clients = [System.Collections.ArrayList]@($registry.clients)
 $clients.Add($newClient) | Out-Null
@@ -162,14 +173,26 @@ $registry.clients = $clients.ToArray()
 $registry | ConvertTo-Json -Depth 5 | Set-Content -Path $ServerRegistryFile -Encoding UTF8
 Write-Log "server-registry.json actualizado" 'OK'
 
+# Agregar entrada de hosts para el cliente (alias de loopback único)
+$hostsFile    = "$env:SystemRoot\System32\drivers\etc\hosts"
+$hostsContent = Get-Content $hostsFile -Raw
+$hostsEntry   = "$localAddress`t$machineLower"
+if ($hostsContent -notmatch [regex]::Escape($machineLower)) {
+    Add-Content -Path $hostsFile -Value "`n$hostsEntry" -Encoding ASCII
+    Write-Log "Hosts: añadida entrada '$hostsEntry'" 'OK'
+} else {
+    Write-Log "Hosts: '$machineLower' ya existe, omitiendo" 'WARN'
+}
+
 # -------------------------------------------------------
-# 6. Reconstruir server-relay.yml con todos los clientes
+# 7. Reconstruir server-relay.yml con todos los clientes
 # -------------------------------------------------------
 $connString = (Get-Content $ServerConfigFile -Raw) -match 'AzureRelayConnectionString:\s*"([^"]+)"'
 $connStr    = $Matches[1]
 
 $localForwards = $registry.clients | ForEach-Object {
-    "  - RelayName: `"$($_.relayName)`"`n    BindAddress: localhost`n    BindPort: $($_.bindPort)"
+    $addr = if ($_.localAddress) { $_.name } else { "localhost" }
+    "  - RelayName: `"$($_.relayName)`"`n    BindAddress: `"$addr`"`n    BindPort: $($_.bindPort)"
 }
 $localForwardsBlock = if ($localForwards) { $localForwards -join "`n" } else { "[]" }
 
@@ -187,7 +210,7 @@ $newServerYml | Set-Content -Path $ServerConfigFile -Encoding UTF8
 Write-Log "server-relay.yml actualizado ($($registry.clients.Count) clientes)" 'OK'
 
 # -------------------------------------------------------
-# 7. Si el servidor esta instalado, propagar config y reiniciar
+# 8. Si el servidor esta instalado, propagar config y reiniciar
 # -------------------------------------------------------
 $installedConfig = Join-Path $ServerInstallPath 'azbridge.config.yml'
 if (Test-Path $installedConfig) {
@@ -207,15 +230,15 @@ if (Test-Path $installedConfig) {
 }
 
 # -------------------------------------------------------
-# 8. Resumen
+# 9. Resumen
 # -------------------------------------------------------
 Write-Host "`n========== CLIENTE REGISTRADO ==========" -ForegroundColor Green
 Write-Host @"
 
-  Maquina  : $MachineName
-  HC Relay : $hcName
-  Puerto   : localhost:$bindPort -> Azure Relay -> ${MachineName}:$WinRMPort
-  YAML     : $clientYmlPath
+  Maquina      : $MachineName
+  HC Relay     : $hcName
+  Puerto local : $localAddress ($machineLower) : $bindPort -> Azure Relay -> ${MachineName}:$bindPort
+  YAML cliente : $clientYmlPath
 
   PROXIMOS PASOS:
     1. Copia '$clientYmlPath' al equipo '$MachineName'
@@ -223,5 +246,7 @@ Write-Host @"
          .\Register-RelayClient.ps1 -ConfigFile "client-$machineLower.yml"
     3. Conectar desde el servidor:
          .\Connect-RelaySession.ps1 -MachineName "$machineLower" -Username "DOMINIO\admin"
+
+  NOTA: WinRM en el cliente se configurará automaticamente en el puerto $bindPort (Register-RelayClient.ps1)
 
 "@ -ForegroundColor Cyan
