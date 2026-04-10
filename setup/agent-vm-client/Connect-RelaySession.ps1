@@ -25,6 +25,7 @@ param(
     [string]$RegistryFile   = '.\server-registry.json',
     [string]$ServerTaskName = 'RelayAdminServer',
     [string]$Command,
+    [string]$Password,
     [switch]$NoSession
 )
 
@@ -101,7 +102,7 @@ if ($localAddress) {
 # -------------------------------------------------------
 # 2. Verificar que el puerto esta escuchando
 # -------------------------------------------------------
-Write-Log "Verificando puerto $machineLower:$LocalPort..."
+Write-Log "Verificando puerto ${machineLower}:${LocalPort}..."
 $maxWait   = 15
 $connected = $false
 $targetHost = if ($localAddress) { $machineLower } else { 'localhost' }
@@ -122,13 +123,18 @@ if (-not $connected) {
     Write-Log "Estado de todos los clientes: .\Get-VMStatus.ps1 -ResourceGroup <rg> -Namespace <ns>" 'WARN'
     exit 1
 }
-Write-Log "Tunel activo: $targetHost:$LocalPort -> Azure Relay -> $machineLower" 'OK'
+Write-Log "Tunel activo: ${targetHost}:${LocalPort} -> Azure Relay -> $machineLower" 'OK'
 
 # -------------------------------------------------------
 # 3. Abrir sesion WinRM a traves del tunel
 # -------------------------------------------------------
 try {
-    $cred = Get-Credential -UserName $Username -Message "Credenciales para el equipo '$machineLower'"
+    if ($Password) {
+        $secPwd = ConvertTo-SecureString $Password -AsPlainText -Force
+        $cred   = New-Object System.Management.Automation.PSCredential($Username, $secPwd)
+    } else {
+        $cred = Get-Credential -UserName $Username -Message "Credenciales para el equipo '$machineLower'"
+    }
 
     if ($Command) {
         Write-Log "Ejecutando comando remoto en '$machineLower': $Command"
@@ -139,7 +145,7 @@ try {
             -ScriptBlock ([ScriptBlock]::Create($Command))
         $result
     } elseif (-not $NoSession) {
-        Write-Log "Abriendo sesion interactiva en '$machineLower' ($targetHost:$LocalPort)..." 'OK'
+        Write-Log "Abriendo sesion interactiva en '$machineLower' (${targetHost}:${LocalPort})..." 'OK'
         Write-Host "  Para salir escribe: exit`n" -ForegroundColor Yellow
         Enter-PSSession -ComputerName $targetHost -Port $LocalPort `
             -Credential $cred `
