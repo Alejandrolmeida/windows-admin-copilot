@@ -50,14 +50,56 @@ $clients  = @($registry.clients | Where-Object { $_ -ne $null })
 # -------------------------------------------------------
 # 2. Estado de la tarea del servidor
 # -------------------------------------------------------
-$serverTask  = Get-ScheduledTask -TaskName $ServerTaskName -ErrorAction SilentlyContinue
-$serverState = if ($serverTask) { $serverTask.State } else { "No instalada" }
-$serverOk    = $serverState -eq "Running"
+$serverTask    = Get-ScheduledTask -TaskName $ServerTaskName 2>$null
+$azProcs       = @(Get-Process -Name 'azbridge' -ErrorAction SilentlyContinue)
+$azProcRunning = $azProcs.Count -gt 0
+
+# Detectar si la tarea existe pero es SYSTEM (no visible sin admin).
+# schtasks devuelve "Acceso denegado" (ES) o "Access is denied" (EN) si la tarea
+# EXISTE pero no tenemos permisos para leerla, a diferencia de "no se encontro el archivo"
+# cuando la tarea no existe en absoluto.
+$taskIsSystemLevel = $false
+if (-not $serverTask) {
+    $schtasksOut = (schtasks.exe /Query /TN $ServerTaskName 2>&1) -join ' '
+    if ($schtasksOut -match 'Acceso denegado|Access is denied') {
+        $taskIsSystemLevel = $true
+    }
+}
+
+if ($serverTask) {
+    $serverState = $serverTask.State
+    $serverOk    = $serverState -eq "Running"
+    $serverIcon  = if ($serverOk) { "✅" } else { "⚠️" }
+    $serverColor = if ($serverOk) { 'Green' } else { 'Yellow' }
+    $serverLabel = "Tarea '$ServerTaskName' — $serverState"
+} elseif ($taskIsSystemLevel -and $azProcRunning) {
+    $pids = ($azProcs | ForEach-Object { $_.Id }) -join ", "
+    $serverOk    = $true
+    $serverIcon  = "✅"
+    $serverColor = 'Green'
+    $serverLabel = "Tarea '$ServerTaskName' (SYSTEM) — Running [PID: $pids]"
+} elseif ($taskIsSystemLevel) {
+    $serverOk    = $false
+    $serverIcon  = "⚠️"
+    $serverColor = 'Yellow'
+    $serverLabel = "Tarea '$ServerTaskName' (SYSTEM) — No está ejecutando"
+} elseif ($azProcRunning) {
+    $pids = ($azProcs | ForEach-Object { $_.Id }) -join ", "
+    $serverOk    = $true
+    $serverIcon  = "⚠️"
+    $serverColor = 'Yellow'
+    $serverLabel = "Proceso manual (sin tarea) — Running [PID: $pids]"
+} else {
+    $serverOk    = $false
+    $serverIcon  = "❌"
+    $serverColor = 'Red'
+    $serverLabel = "Tarea '$ServerTaskName' — No instalada"
+}
 
 Write-Host "  Namespace   : $($registry.namespace)" -ForegroundColor White
 Write-Host "  Endpoint    : $($registry.endpoint)" -ForegroundColor DarkGray
 Write-Host "  Generado    : $($registry.generatedAt)" -ForegroundColor DarkGray
-Write-Host "  Servidor    : $(icon $serverOk) Tarea '$ServerTaskName' — $serverState" -ForegroundColor $(if ($serverOk) { 'Green' } else { 'Red' })
+Write-Host "  Servidor    : $serverIcon $serverLabel" -ForegroundColor $serverColor
 Write-Host "  Clientes    : $($clients.Count) registrados" -ForegroundColor White
 Write-Host ""
 
@@ -144,5 +186,12 @@ Write-Host ""
 
 if (-not $ShowListeners -and $clients.Count -gt 0) {
     Write-Host "  💡 Usa -ShowListeners para consultar contadores de listeners en Azure." -ForegroundColor DarkGray
+    Write-Host ""
+}
+
+if (-not $serverTask -and -not $taskIsSystemLevel -and $azProcRunning) {
+    Write-Host "  ⚠️  El relay funciona como proceso manual." -ForegroundColor Yellow
+    Write-Host "     Para instalar como tarea persistente (arranque automatico), ejecuta como Admin:" -ForegroundColor DarkGray
+    Write-Host "     .\Install-RelayServer.ps1" -ForegroundColor Cyan
     Write-Host ""
 }
