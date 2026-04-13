@@ -260,94 +260,180 @@ Write-Host "Reboot Pending: $reboot"
 
 ---
 
-## Arquitectura Azure Relay Hybrid Connections
+## 🚀 ESTE PROYECTO — Contexto Operativo Completo
 
-Este proyecto usa **Azure Relay Hybrid Connections** para conectar con servidores remotos sin abrir puertos en el firewall.
+### Qué es este repositorio
 
+`windows-admin-copilot` es la estación de administración remota centralizada de infraestructura Windows. Usa **Azure Relay Hybrid Connections** para conectar con servidores remotos **sin VPN y sin abrir puertos de entrada**: los clientes hacen una conexión saliente TLS/443 a Azure, y el agente se conecta a través del relay.
+
+### ⚠️ Problema Conocido: az CLI roto en PATH
+
+`az.bat` en PATH apunta a Python 3.14, que **no tiene azure.cli instalado**. La CLI funcional está en Python 3.13. Siempre usar:
+
+```powershell
+# ❌ NO funciona (Python 3.14 intercepta)
+az relay hyco list ...
+
+# ✅ SÍ funciona
+& 'C:\Users\A.almeida\AppData\Local\Programs\Python\Python313\python.exe' -m azure.cli relay hyco list ...
+
+# O poner Python 3.13 primero en PATH en la sesión actual:
+$env:PATH = 'C:\Users\A.almeida\AppData\Local\Programs\Python\Python313;' +
+            'C:\Users\A.almeida\AppData\Local\Programs\Python\Python313\Scripts;' + $env:PATH
 ```
-[Copilot CLI / Agente]
-        │
-        │  WinRM → 127.0.0.x:15985 (loopback)
-        ▼
-[azbridge (cliente local)]
-        │
-        │  TLS/443 → Azure Relay Namespace
-        ▼
-[relay-plenergy.servicebus.windows.net]
-        │
-        │  Hybrid Connection
-        ▼
-[azbridge (servidor remoto)]
-        │
-        │  WinRM → localhost:5985
-        ▼
-[Servidor Windows remoto]
-```
+
+> `Get-RelayStatus.ps1` ya tiene este fallback incorporado. No hace falta hacer nada manual al ejecutarlo.
 
 ### Constantes de Proyecto
 
 ```powershell
-$WINCOPILOT_ROOT   = "C:\Users\A.almeida\source\repos\alejandrolmeida\windows-admin-copilot"
-$WINCOPILOT_CFG    = "$WINCOPILOT_ROOT\.config"          # Credenciales y config local (gitignored)
-$WINCOPILOT_RELAY  = "$WINCOPILOT_ROOT\setup\agent-vm-client"  # Scripts de relay
-$WINCOPILOT_CREDS  = "$WINCOPILOT_CFG\credentials.json"
-$WINCOPILOT_REG    = "$WINCOPILOT_CFG\server-registry.json"
+$REPO   = "C:\Users\A.almeida\source\repos\alejandrolmeida\windows-admin-copilot"
+$CFG    = "$REPO\.config"                   # Credenciales y config local (gitignored)
+$RELAY  = "$REPO\setup\agent-vm-client"     # Scripts de relay
+$CREDS  = "$CFG\credentials.json"
+$REG    = "$CFG\server-registry.json"
 ```
 
-### Árbol de Decisión para Conectar a un Servidor
+### Arquitectura del Relay
 
-1. **¿Está el relay activo?** → `Get-RelayStatus.ps1 -ConfigPath "$WINCOPILOT_CFG"`
-2. **¿Está el servidor registrado?** → Leer `$WINCOPILOT_REG`, buscar `name == servidor`
-3. **¿Hay credenciales?** → Leer `$WINCOPILOT_CREDS`, buscar `name == servidor`
-4. **Preparar WinRM local:**
-   ```powershell
-   $localAddr = "127.0.0.2"   # del server-registry.json
-   Set-Item WSMan:\localhost\Client\TrustedHosts -Value $localAddr -Force
-   ```
-5. **Crear PSSession:**
-   ```powershell
-   $cred = New-Object PSCredential("prod3", (ConvertTo-SecureString "***REDACTED***" -AsPlainText -Force))
-   $so   = New-PSSessionOption -SkipCACheck -SkipCNCheck
-   $sess = New-PSSession -ComputerName 127.0.0.2 -Port 15985 -Credential $cred `
-                         -Authentication Basic -SessionOption $so
-   ```
-
-### Playbook Relay — Operaciones Comunes
-
-| Operación | Comando |
-|-----------|---------|
-| Ver estado del relay | `& "$WINCOPILOT_RELAY\Get-RelayStatus.ps1" -ConfigPath "$WINCOPILOT_CFG"` |
-| Registrar cliente relay | `& "$WINCOPILOT_RELAY\Register-RelayClient.ps1" -ConfigFile "$WINCOPILOT_CFG\client-srvplenoilfs.yml"` |
-| Conectar sesión PS | Ver árbol de decisión paso 5 |
-| Ver VMs del servidor | `& "$WINCOPILOT_RELAY\Get-VMStatus.ps1" -ConfigPath "$WINCOPILOT_CFG"` |
-| Añadir nuevo servidor | `& "$WINCOPILOT_RELAY\Add-RelayClient.ps1" -ServerName "nuevo" -ConfigPath "$WINCOPILOT_CFG"` |
+```
+[Agente Copilot / Admin]
+        │
+        │  New-PSSession → 127.0.0.2:15985 (loopback)
+        ▼
+[azbridge - Tarea: RelayAdminServer  (C:\RelayAdminServer\azbridge.exe)]
+        │
+        │  TLS/443 → sb://relay-plenergy.servicebus.windows.net
+        ▼
+[Azure Relay — Hybrid Connection: winrm-srvplenoilfs]
+        │
+        │  → SRVPLENOILFS
+        ▼
+[azbridge - Tarea: RelayClient  (C:\RelayClient\azbridge.exe)]
+        │
+        │  WinRM → localhost:5985
+        ▼
+[SRVPLENOILFS — Windows Server 2019 Standard]
+```
 
 ---
 
-## Carpeta `.config\` — Configuración Local (Gitignored)
+## 📋 SERVIDORES REGISTRADOS
 
-> ⚠️ Esta carpeta está en `.gitignore`. **NUNCA** hacer commit de su contenido.
+### `srvplenoilfs` — Servidor de Producción Plenoil
 
-Ubicación: `<repo-root>\.config\`
+| Campo | Valor |
+|-------|-------|
+| Hostname | `SRVPLENOILFS` |
+| OS | Windows Server 2019 Standard |
+| RAM | 300 GB total |
+| Relay HC | `winrm-srvplenoilfs` |
+| Loopback IP | `127.0.0.2` |
+| Puerto WinRM | `15985` |
+| Auth | Basic / usuario `prod3` |
+| Credenciales | `$CFG\credentials.json` → `servers[name=srvplenoilfs]` |
+
+**Discos conocidos:**
+| Unidad | Libre | Usado |
+|--------|-------|-------|
+| C: | ~1275 GB | ~724 GB |
+| E: | ~1272 GB | ~2227 GB |
+| F: | ~775 GB | ~224 GB |
+| G: | ~507 GB | ~2492 GB |
+| H: | ~631 GB | ~368 GB |
+| T: | ~314 GB | ~2685 GB |
+
+**Servicios clave instalados:**
+- `MicrosoftDynamicsNavServer$BC180_PLENOIL_UP` — Business Central PRODUCCIÓN
+- `MicrosoftDynamicsNavServer$BC180_PLENOIL_UP_DESA` — Business Central DESARROLLO
+- SQL Server (backend de BC)
+
+> ⚠️ Los dos servicios BC pueden estar parados si no están activos en ese momento. Verificar siempre antes de asumir incidencia.
+
+---
+
+## 🔧 RECETA DE CONEXIÓN (copiar y pegar)
+
+### 1. Verificar estado del relay
+
+```powershell
+& "$RELAY\Get-RelayStatus.ps1" -ShowListeners
+```
+
+Salida esperada: `✅ Activo  CONECTADO  Listeners: 1`
+
+### 2. Conectar a `srvplenoilfs`
+
+```powershell
+$cfg = Get-Content "$CFG\credentials.json" -Raw | ConvertFrom-Json
+$srv = $cfg.servers | Where-Object { $_.name -eq 'srvplenoilfs' }
+
+Set-Item WSMan:\localhost\Client\TrustedHosts -Value $srv.localAddress -Force
+
+$cred = New-Object PSCredential(
+    $srv.auth.username,
+    (ConvertTo-SecureString $srv.auth.password -AsPlainText -Force)
+)
+$so   = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+$sess = New-PSSession -ComputerName $srv.localAddress -Port $srv.localPort `
+    -Credential $cred -Authentication Basic -SessionOption $so
+
+# Ejecutar un comando
+Invoke-Command -Session $sess -ScriptBlock { hostname; Get-Date }
+
+# Sesión interactiva
+Enter-PSSession -Session $sess
+```
+
+### 3. Registrar un nuevo servidor (flujo completo)
+
+```powershell
+# En el servidor de administración (este equipo):
+& "$RELAY\Add-RelayClient.ps1" -ResourceGroup "rg-relay" -Namespace "relay-plenergy" -MachineName "nuevo-server"
+# → Genera $CFG\client-nuevo-server.yml → copiar al equipo remoto
+
+# En el equipo remoto (como Administrador):
+& "$RELAY\Register-RelayClient.ps1" -ConfigFile "client-nuevo-server.yml"
+
+# Añadir credenciales al registry local:
+# Editar $CFG\credentials.json con el nuevo servidor
+
+# Verificar:
+& "$RELAY\Get-RelayStatus.ps1" -ShowListeners
+```
+
+---
+
+## 📁 Carpeta `.config\` — Configuración Local (Gitignored)
+
+> ⚠️ **NUNCA** hacer commit de esta carpeta. Contiene connection strings y credenciales.
 
 | Fichero | Contenido |
 |---------|-----------|
 | `credentials.json` | Usuarios, passwords y opciones WinRM por servidor |
-| `server-registry.json` | Registro de servidores y puertos relay |
-| `server-relay.yml` | Config azbridge del lado agente (connection string send) |
-| `client-<nombre>.yml` | Config azbridge del lado servidor remoto (connection string listen) |
+| `server-registry.json` | Registro de servidores: HC, IP loopback, puerto |
+| `server-relay.yml` | Config azbridge del servidor (SAS Send, LocalForwards) |
+| `client-<nombre>.yml` | Config azbridge del cliente remoto (SAS Listen) |
 
-### Servidores Registrados
+---
 
-| Servidor | Relay | Dirección Local | Puerto | Usuario |
-|----------|-------|-----------------|--------|---------|
-| `srvplenoilfs` | `winrm-srvplenoilfs` | `127.0.0.2` | `15985` | `prod3` |
+## 📜 Scripts del Relay — Referencia Rápida
+
+| Script | Cuándo usarlo |
+|--------|---------------|
+| `Get-RelayStatus.ps1 [-ShowListeners]` | **Diagnóstico rápido**. Siempre primero. |
+| `Get-VMStatus.ps1 -ResourceGroup rg-relay -Namespace relay-plenergy` | Visibilidad Azure API |
+| `Connect-RelaySession.ps1 -MachineName srvplenoilfs -Username prod3` | Sesión WinRM interactiva |
+| `Add-RelayClient.ps1` | Registrar nuevo servidor |
+| `Install-RelayServer.ps1` | Reinstalar tarea `RelayAdminServer` (una sola vez) |
+| `Remove-RelayServer.ps1` / `Remove-RelayClient.ps1` | Desinstalación |
 
 ### Reglas de Comportamiento del Agente
 
-1. **Rutas absolutas siempre**: usar `$WINCOPILOT_CFG` nunca rutas relativas
-2. **Leer credenciales de `.config\credentials.json`** — no hardcodear en scripts
-3. **Antes de conectar**: verificar que el relay esté activo con `Get-RelayStatus.ps1`
-4. **TrustedHosts**: añadir `127.0.0.x` antes de `New-PSSession` con autenticación Basic
-5. **Al añadir servidor nuevo**: actualizar `credentials.json` Y `server-registry.json`
+1. **Antes de conectar** → ejecutar `Get-RelayStatus.ps1 -ShowListeners` y confirmar `Listeners: 1`
+2. **Credenciales** → leer siempre de `$CFG\credentials.json`, nunca hardcodear
+3. **TrustedHosts** → añadir `127.0.0.x` ANTES de `New-PSSession -Authentication Basic`
+4. **az CLI** → si `az` del PATH falla, usar Python 3.13 (ver sección de problema conocido)
+5. **Nuevo servidor** → actualizar `credentials.json` Y `server-registry.json`
+6. **Rutas** → usar `$REPO`, `$CFG`, `$RELAY` como prefijo, nunca rutas relativas
 

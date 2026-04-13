@@ -71,12 +71,36 @@ if ($clients.Count -eq 0) {
 # -------------------------------------------------------
 $listenerMap = @{}
 if ($ShowListeners) {
+    # Resolver az: verificar que funciona (puede apuntar a Python incorrecto), con fallback a python.exe
+    $azResolved = $null
+
     $azOk = Get-Command az -ErrorAction SilentlyContinue
     if ($azOk) {
-        $hcs = az relay hyco list `
-            --resource-group $registry.resourceGroup `
-            --namespace-name  $registry.namespace `
-            --output json 2>$null | ConvertFrom-Json
+        az account show --output none 2>$null
+        if ($LASTEXITCODE -eq 0) { $azResolved = 'az' }
+    }
+
+    if (-not $azResolved) {
+        # Fallback: buscar python.exe con azure.cli instalado (ej. coexistencia Python 3.13 + 3.14)
+        $pyPaths = @(
+            "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python313\python.exe",
+            "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python312\python.exe"
+        )
+        foreach ($py in $pyPaths) {
+            if (Test-Path $py) {
+                & $py -m azure.cli account show --output none 2>$null
+                if ($LASTEXITCODE -eq 0) { $azResolved = $py; break }
+            }
+        }
+    }
+
+    if ($azResolved) {
+        $hcsJson = if ($azResolved -eq 'az') {
+            az relay hyco list --resource-group $registry.resourceGroup --namespace-name $registry.namespace --output json 2>$null
+        } else {
+            & $azResolved -m azure.cli relay hyco list --resource-group $registry.resourceGroup --namespace-name $registry.namespace --output json 2>$null
+        }
+        $hcs = $hcsJson | ConvertFrom-Json
         foreach ($hc in $hcs) { $listenerMap[$hc.name] = $hc.listenerCount }
     } else {
         Write-Host "  ⚠️  az CLI no disponible — omitiendo consulta de listeners en Azure." -ForegroundColor Yellow
