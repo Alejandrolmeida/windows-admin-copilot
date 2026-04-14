@@ -86,6 +86,38 @@ PREV_REPORTS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Resultados del test de velocidad a internet (14/04/2026 14:10)
+# ---------------------------------------------------------------------------
+SPEEDTEST_RESULTS = [
+    {
+        "server":          "srvplenoilfs",
+        "download_mbps":   38.64,
+        "elapsed_s":       4.9,
+        "test_size_mb":    23.8,
+        "test_endpoint":   "Cloudflare Speed Test (speed.cloudflare.com)",
+        "timestamp":       "14/04/2026 14:10:24",
+        "latency": {
+            "Google DNS (8.8.8.8)":     "4 ms",
+            "Cloudflare (1.1.1.1)":     "ICMP bloqueado",
+            "Azure portal.azure.com":   "ICMP bloqueado",
+        },
+    },
+    {
+        "server":          "sql-restore-001",
+        "download_mbps":   42.35,
+        "elapsed_s":       4.5,
+        "test_size_mb":    23.8,
+        "test_endpoint":   "Cloudflare Speed Test (speed.cloudflare.com)",
+        "timestamp":       "14/04/2026 14:10:42",
+        "latency": {
+            "Google DNS (8.8.8.8)":     "1 ms",
+            "Cloudflare (1.1.1.1)":     "ICMP bloqueado",
+            "Azure portal.azure.com":   "ICMP bloqueado",
+        },
+    },
+]
+
+# ---------------------------------------------------------------------------
 # Jobs SQL Agent criticos identificados
 # ---------------------------------------------------------------------------
 SQL_JOBS = [
@@ -718,7 +750,73 @@ def generate_report(monitoring_data: dict, output_path: Path):
     # -----------------------------------------------------------------------
     # 9. PROXIMOS PASOS
     # -----------------------------------------------------------------------
-    add_heading(doc, '9. Proximos Pasos', 1)
+    # -----------------------------------------------------------------------
+    # 9. ANCHO DE BANDA Y CONECTIVIDAD A INTERNET
+    # -----------------------------------------------------------------------
+    add_heading(doc, '9. Ancho de Banda y Conectividad a Internet', 1)
+    doc.add_paragraph(
+        'El 14/04/2026 se realizo un test de velocidad desde cada servidor directamente a internet '
+        '(descarga de 25 MB desde Cloudflare Speed Test vía HTTPS). El objetivo es evaluar el ancho '
+        'de banda disponible de cara a la planificacion de la migracion a Azure.'
+    )
+
+    # Tabla de resultados
+    bw_tbl = doc.add_table(rows=1, cols=5)
+    bw_tbl.style = 'Table Grid'
+    bw_hdrs = ['Servidor', 'Descarga', 'Tiempo', 'Fichero test', 'Hora test']
+    for i, h in enumerate(bw_hdrs):
+        bw_tbl.rows[0].cells[i].text = h
+        bw_tbl.rows[0].cells[i].paragraphs[0].runs[0].bold = True
+        set_cell_bg(bw_tbl.rows[0].cells[i], 'D6E4F0')
+
+    for sp in SPEEDTEST_RESULTS:
+        # Color según velocidad
+        if sp['download_mbps'] >= 100:
+            bg = 'D4EDDA'   # Verde
+        elif sp['download_mbps'] >= 50:
+            bg = 'FFF3CD'   # Amarillo
+        else:
+            bg = 'FFE0E0'   # Rojo suave
+        r = add_table_row(bw_tbl, [
+            sp['server'],
+            f"{sp['download_mbps']} Mbps",
+            f"{sp['elapsed_s']} s",
+            f"{sp['test_size_mb']} MB ({sp['test_endpoint']})",
+            sp['timestamp'],
+        ], bg=bg)
+
+    doc.add_paragraph()
+    add_heading(doc, '9.1 Implicaciones para la migracion', 2)
+
+    bw_avg = round(sum(s['download_mbps'] for s in SPEEDTEST_RESULTS) / len(SPEEDTEST_RESULTS), 1)
+    # Estimacion de transferencia para 57 GB (HechosVentasPOS) + margen
+    size_gb   = 57
+    time_h    = round((size_gb * 1024 * 8) / (bw_avg * 3600), 1)
+
+    implications = [
+        f'Velocidad media de descarga desde los servidores: {bw_avg} Mbps (conexion compartida). '
+        f'La conectividad HTTP/HTTPS a internet es funcional desde ambos servidores.',
+        f'Transferencia estimada de la base de datos mas grande (HechosVentasPOS, ~57 GB): '
+        f'aproximadamente {time_h} horas a {bw_avg} Mbps de media. '
+        f'Para reducir el tiempo de migración se recomienda usar Azure Data Box o ExpressRoute.',
+        'Nota sobre ICMP: las pruebas de ping a 1.1.1.1 (Cloudflare) y portal.azure.com '
+        'retornaron "sin respuesta" — esto es esperado ya que ambos destinos filtran ICMP '
+        'en sus firewalls perimetrales. La conectividad HTTPS funciona correctamente.',
+        'Escenario post-migracion (IaaS completo): al migrar la totalidad de la infraestructura '
+        '(SQL + NAV + AD DS) a Azure, los usuarios accederan a los servidores Azure directamente. '
+        'Se recomienda conectividad VPN site-to-site o ExpressRoute para garantizar '
+        'latencia adecuada desde las sedes de Plenergy.',
+        '40 Mbps compartidos puede ser insuficiente si los usuarios finales acceden a '
+        'Dynamics NAV a traves de la conexion a internet durante el periodo de transicion. '
+        'Evaluar QoS y posible upgrade de linea antes del cutover.',
+    ]
+    for b in implications:
+        add_bullet(doc, b)
+
+    # -----------------------------------------------------------------------
+    # 10. PROXIMOS PASOS
+    # -----------------------------------------------------------------------
+    add_heading(doc, '10. Proximos Pasos', 1)
 
     steps = [
         ('Inmediato (esta semana)',
