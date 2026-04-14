@@ -258,14 +258,14 @@ def generate_report(monitoring_data: dict, output_path: Path):
     doc.add_paragraph()
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title_p.add_run('Planificacion de Migracion a Azure SQL')
+    run = title_p.add_run('Planificacion de Migracion a Azure (IaaS)')
     run.bold      = True
     run.font.size = Pt(22)
     run.font.color.rgb = RGBColor(0x00, 0x47, 0x9D)  # Azul corporativo
 
     sub_p = doc.add_paragraph()
     sub_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    sub_p.add_run('Analisis de Workload y Plan de Monitorización Extendida\n').font.size = Pt(14)
+    sub_p.add_run('Analisis de Workload — SQL Server, Capa de Aplicacion NAV y AD DS\n').font.size = Pt(14)
 
     client_p = doc.add_paragraph()
     client_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -294,8 +294,12 @@ def generate_report(monitoring_data: dict, output_path: Path):
         'Las 24 horas de monitorización NO son suficientemente representativas: quedan sin capturar el job '
         'IndicesEstadisticas (25h 43min, sql-restore-001) y ProcesarCubosdomingo (6h 21min, srvplenoilfs, fines '
         'de semana), ademas de un pico de fin de mes generado por los usuarios.',
+        'El ALCANCE DE MIGRACION se ha ampliado para incluir la totalidad de la infraestructura implicada: '
+        '2 servidores SQL Server + 2 servidores de aplicacion Dynamics NAV + 1 replica AD DS en Azure. '
+        'El modelo adoptado es IaaS (lift & shift) para garantizar compatibilidad total con los procesos '
+        'y procedimientos almacenados existentes.',
         'Se propone una monitorización extendida de al menos 7 dias para obtener una fotografia completa del '
-        'workload real antes de proceder al sizing de las instancias Azure SQL.',
+        'workload real antes de proceder al sizing definitivo de las instancias Azure IaaS.',
     ]
     for b in summary_bullets:
         add_bullet(doc, b)
@@ -311,13 +315,29 @@ def generate_report(monitoring_data: dict, output_path: Path):
     # -----------------------------------------------------------------------
     add_heading(doc, '2. Contexto del Proyecto', 1)
     doc.add_paragraph(
-        'Plenergy dispone de dos servidores SQL Server on-premises con cargas criticas de negocio '
-        '(procesamiento de cubos OLAP, backup diario, actualizacion de indices). El objetivo es '
-        'dimensionar la infraestructura Azure SQL necesaria para migrar estas cargas con las '
-        'garantias de rendimiento y disponibilidad actuales.'
+        'Plenergy dispone de una infraestructura on-premises compuesta por servidores SQL Server con cargas '
+        'criticas de negocio (procesamiento de cubos OLAP, backup diario, actualizacion de indices), '
+        'servidores de aplicacion Dynamics NAV y un controlador de dominio Active Directory. '
+        'El objetivo es migrar toda esta infraestructura a Azure con el modelo IaaS (Infrastructure as a Service / '
+        'lift & shift), manteniendo las VMs en Azure sin cambios en el software ni en la logica de negocio.'
     )
 
-    add_heading(doc, '2.1 Entorno actual', 2)
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    r = p.add_run('Razon de la eleccion de IaaS frente a PaaS: ')
+    r.bold = True
+    p.add_run(
+        'El entorno de Plenergy contiene procedimientos almacenados y procesos de negocio en Dynamics NAV '
+        'con dependencias especificas de la version y configuracion actuales. La migracion a PaaS '
+        '(Azure SQL Managed Instance, Azure App Service) exigiria un analisis exhaustivo de compatibilidad '
+        'y posibles adaptaciones de codigo. El modelo IaaS elimina este riesgo al replicar fielmente el '
+        'entorno on-premises en Azure, permitiendo una migracion rapida y segura sin afectar a los procesos.'
+    )
+
+    add_heading(doc, '2.1 Entorno actual — Alcance completo de migracion', 2)
+    doc.add_paragraph(
+        'La siguiente tabla detalla la totalidad de los servidores incluidos en el alcance de migracion a Azure IaaS:'
+    )
     servers_tbl = doc.add_table(rows=1, cols=4)
     servers_tbl.style = 'Table Grid'
     hdr = servers_tbl.rows[0].cells
@@ -327,11 +347,47 @@ def generate_report(monitoring_data: dict, output_path: Path):
         set_cell_bg(hdr[i], 'D6E4F0')
 
     server_rows = [
-        ['srvplenoilfs',   'Procesamiento OLAP / ETL',             '240 GB', 'Cubos de ventas y compras (Navision/BC)'],
-        ['sql-restore-001','SQL Server Operacional / Backup/Restore','240 GB', 'Base de datos principal + mantenimiento de indices'],
+        ['srvplenoilfs',    'SQL Server — Procesamiento OLAP / ETL',           '240 GB',       'Cubos de ventas y compras (Navision/BC)'],
+        ['sql-restore-001', 'SQL Server — Operacional / Backup-Restore',        '240 GB',       'Base de datos principal + mantenimiento de indices'],
+        ['nav-app-01',      'Servidor Aplicacion Dynamics NAV (primario)',       'Por confirmar', 'NST NAV — sesiones de usuarios + servicios web'],
+        ['nav-app-02',      'Servidor Aplicacion Dynamics NAV (secundario)',     'Por confirmar', 'NST NAV — balanceo de carga / alta disponibilidad'],
+        ['adds-replica',    'Controlador de Dominio AD DS — Replica Azure',      'Por confirmar', 'DNS + autenticacion Kerberos en la zona Azure'],
     ]
     for row in server_rows:
-        add_table_row(servers_tbl, row)
+        r = add_table_row(servers_tbl, row)
+        # Destacar los servidores nuevos (pendientes de inventario)
+        if 'Por confirmar' in row[2]:
+            for cell in r.cells:
+                set_cell_bg(cell, 'FFF3CD')
+
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    r = p.add_run('NOTA: ')
+    r.bold = True
+    p.add_run(
+        'Los servidores nav-app-01, nav-app-02 y adds-replica estan pendientes de inventario '
+        '(RAM, CPU, version de SO y NAV). El sizing de estas VMs se realizara en una segunda fase '
+        'una vez completados los ciclos de monitorización SQL.'
+    )
+
+    add_heading(doc, '2.2 Arquitectura de red en Azure (IaaS)', 2)
+    doc.add_paragraph(
+        'Al migrar toda la pila de aplicacion a Azure IaaS, la latencia entre los servidores NAV '
+        'y SQL Server sera minima (red interna de Azure, < 1 ms dentro de la misma region y VNet). '
+        'El dominio AD DS se extiende a Azure mediante una replica del controlador de dominio, '
+        'evitando dependencias de autenticacion criticas con el entorno on-premises durante la '
+        'operacion normal en Azure.'
+    )
+
+    arch_bullets = [
+        'Azure Virtual Network (VNet) con subredes segregadas: aplicacion, datos, administracion.',
+        'SQL Server en VMs con discos Premium SSD o Ultra Disk segun los IOPS definitivos del sizing.',
+        'Servidores NAV en VMs Windows Server 2022 con el mismo NST y version de Dynamics NAV actual.',
+        'AD DS replica en VM ligera (Standard_D2s_v5 orientativo) — solo lectura/DNS desde Azure.',
+        'Conectividad hibrida con on-premises via Azure VPN Gateway o ExpressRoute durante la transicion.',
+    ]
+    for b in arch_bullets:
+        add_bullet(doc, b)
 
     # -----------------------------------------------------------------------
     # 3. ANALISIS PREVIOS (13/04/2026)
@@ -560,35 +616,44 @@ def generate_report(monitoring_data: dict, output_path: Path):
     )
 
     # -----------------------------------------------------------------------
-    # 8. CONSIDERACIONES PARA EL SIZING AZURE
+    # 8. CONSIDERACIONES PARA EL SIZING AZURE IAAS
     # -----------------------------------------------------------------------
-    add_heading(doc, '8. Consideraciones Previas al Sizing Azure', 1)
+    add_heading(doc, '8. Consideraciones para el Sizing Azure IaaS', 1)
 
-    add_heading(doc, '8.1 Latencia y arquitectura de red', 2)
+    add_heading(doc, '8.1 Modelo de despliegue: IaaS (lift & shift)', 2)
     doc.add_paragraph(
-        'La migracion a Azure SQL (PaaS o IaaS) introducira latencia de red entre los clientes '
-        'de Navision/Business Central y el motor SQL. En entornos con >100 usuarios concurrentes '
-        'o queries OLAP de larga duracion, esta latencia puede tener impacto significativo. '
-        'Se recomienda analizar la posibilidad de colocar la capa de aplicacion tambien en Azure '
-        '(Azure App Service, Azure VMs) para minimizar el round-trip.'
+        'La migracion adopta el modelo IaaS: cada servidor on-premises se convierte en una Azure VM '
+        'equivalente, manteniendo el mismo sistema operativo, version de SQL Server y configuracion '
+        'de Dynamics NAV. Esto garantiza compatibilidad total con los procedimientos almacenados '
+        'y los procesos automatizados actuales, sin necesidad de adaptar codigo.'
     )
+    iaas_bullets = [
+        'SQL Server on Azure VM: version identica al servidor actual, licencia via Azure Hybrid Benefit (AHUB) '
+        'para reducir coste si dispone de licencias SA activas.',
+        'Dynamics NAV NST: misma version instalada en VMs Windows Server equivalentes — sin recompilacion.',
+        'AD DS replica: extiende el dominio existente a Azure, Kerberos funciona sin cambios para NAV y SQL.',
+        'No se requiere reescritura de stored procedures, jobs SQL Agent ni logica de integracion.',
+    ]
+    for b in iaas_bullets:
+        add_bullet(doc, b)
 
-    add_heading(doc, '8.2 Sizing preliminar (a revisar)', 2)
+    add_heading(doc, '8.2 Sizing preliminar SQL Server (a revisar tras Ciclos 2-4)', 2)
     doc.add_paragraph(
-        'Con los datos del Ciclo 1 y aplicando el factor de seguridad x1,3, los rangos preliminares son:'
+        'Con los datos del Ciclo 1 y aplicando el factor de seguridad x1,3, los rangos preliminares '
+        'para las VMs SQL son:'
     )
 
     sizing_tbl = doc.add_table(rows=1, cols=5)
     sizing_tbl.style = 'Table Grid'
-    sizing_hdrs = ['Servidor', 'RAM medida', 'RAM Azure (+30%)', 'CPU medido', 'SKU orientativo']
+    sizing_hdrs = ['Servidor', 'RAM medida', 'RAM Azure (+30%)', 'CPU medido', 'SKU orientativo Azure VM']
     for i, h in enumerate(sizing_hdrs):
         sizing_tbl.rows[0].cells[i].text = h
         sizing_tbl.rows[0].cells[i].paragraphs[0].runs[0].bold = True
         set_cell_bg(sizing_tbl.rows[0].cells[i], 'D6E4F0')
 
     sizing_rows = [
-        ['srvplenoilfs',   '131 GB usados / 240 GB totales', '~170 GB', 'Ver datos Ciclo 2+', 'Azure VM: Esv5 / Mv2 series'],
-        ['sql-restore-001','131 GB usados / 240 GB totales', '~170 GB', 'Ver datos Ciclo 2+', 'Azure VM: Esv5 / Mv2 series'],
+        ['srvplenoilfs',   '131 GB usados / 240 GB totales', '~170 GB', 'Ver Ciclo 2+', 'Standard_E48ds_v5 (384 GB) o Mv2 series'],
+        ['sql-restore-001','131 GB usados / 240 GB totales', '~170 GB', 'Ver Ciclo 2+', 'Standard_E48ds_v5 (384 GB) o Mv2 series'],
     ]
     for row in sizing_rows:
         add_table_row(sizing_tbl, row)
@@ -602,13 +667,52 @@ def generate_report(monitoring_data: dict, output_path: Path):
         'IndicesEstadisticas (job de 25h) y los picos de fin de mes.'
     )
 
-    add_heading(doc, '8.3 Nota especial — Fragmentacion y IOPS', 2)
+    add_heading(doc, '8.3 Sizing preliminar Capa de Aplicacion NAV', 2)
+    doc.add_paragraph(
+        'Los servidores de aplicacion NAV estan pendientes de inventario completo. '
+        'Como referencia orientativa para entornos con carga media-alta en Dynamics NAV:'
+    )
+    nav_sizing_tbl = doc.add_table(rows=1, cols=4)
+    nav_sizing_tbl.style = 'Table Grid'
+    for i, h in enumerate(['Servidor', 'Rol', 'SKU orientativo Azure VM', 'Notas']):
+        nav_sizing_tbl.rows[0].cells[i].text = h
+        nav_sizing_tbl.rows[0].cells[i].paragraphs[0].runs[0].bold = True
+        set_cell_bg(nav_sizing_tbl.rows[0].cells[i], 'D6E4F0')
+
+    nav_rows = [
+        ['nav-app-01', 'NST primario',    'Standard_D8s_v5 (32 GB) — revisar con inventario', 'Mismo OS/NAV que on-prem'],
+        ['nav-app-02', 'NST secundario',  'Standard_D8s_v5 (32 GB) — revisar con inventario', 'Balanceo / HA'],
+        ['adds-replica','AD DS replica',  'Standard_D2s_v5 (8 GB) — suficiente para replica',  'DNS en VNet + Kerberos'],
+    ]
+    for row in nav_rows:
+        r = add_table_row(nav_sizing_tbl, row)
+        for cell in r.cells:
+            set_cell_bg(cell, 'FFF3CD')  # Pendientes de confirmar
+
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.add_run('Accion pendiente: ').bold = True
+    p.add_run(
+        'Recopilar el inventario de nav-app-01, nav-app-02 y adds-replica '
+        '(CPU, RAM, OS, version NAV, numero de usuarios concurrentes NST) para '
+        'ajustar el sizing de estas VMs antes de presentar la propuesta economica.'
+    )
+
+    add_heading(doc, '8.4 Nota especial — Fragmentacion y IOPS', 2)
     doc.add_paragraph(
         'La fragmentacion critica identificada en srvplenoilfs (98,46% en PK_HechosVentasPOS) '
         'genera un consumo de IOPS artificialmente elevado. '
         'Se recomienda ejecutar el REBUILD INDEX ANTES de realizar las mediciones definitivas '
         'de IOPS, para no sobredimensionar el almacenamiento Azure SQL en base a un estado '
-        'patologico del servidor.'
+        'patologico del servidor. En Azure IaaS, esto afecta directamente al tipo de disco '
+        '(Premium SSD P-series vs Ultra Disk) y su impacto economico es significativo.'
+    )
+
+    add_heading(doc, '8.5 Azure Hybrid Benefit — Optimizacion de Costes', 2)
+    doc.add_paragraph(
+        'Si Plenergy dispone de licencias SQL Server y Windows Server con Software Assurance (SA) activo, '
+        'puede aplicar Azure Hybrid Benefit para reducir hasta un 40-85% el coste de las VMs SQL. '
+        'Se recomienda verificar el estado de las licencias antes de la propuesta economica final.'
     )
 
     # -----------------------------------------------------------------------
@@ -618,25 +722,29 @@ def generate_report(monitoring_data: dict, output_path: Path):
 
     steps = [
         ('Inmediato (esta semana)',
+         'Recopilar inventario de nav-app-01, nav-app-02 y adds-replica: CPU, RAM, OS, version NAV, '
+         'numero de usuarios concurrentes NST. Necesario para completar el sizing de la propuesta.'),
+        ('Inmediato (esta semana)',
          'Ejecutar REBUILD INDEX ONLINE sobre PK_HechosVentasPOS en ventana de mantenimiento '
          '(noche del martes/miercoles). Esto requiere SQL Server Enterprise Edition para ONLINE=ON.'),
         ('Inmediato (esta semana)',
          'Deshabilitar login "sa" y revisar los 16 logins con sysadmin. Documentar cambios en '
          'sistema de control de cambios.'),
         ('Martes 14/04 — Automatico',
-         'Inicio del Ciclo 2 de monitorización (48h) en ambos servidores. '
+         'Inicio del Ciclo 2 de monitorización (48h) en ambos servidores SQL. '
          'La tarea esta programada en los servidores remotos.'),
         ('Viernes 18/04 — Automatico',
          'Inicio del Ciclo 3 de monitorización en srvplenoilfs (captura fin de semana, '
          'job ProcesarCubosdomingo).'),
         ('Semana del 22/04',
-         'Analizar resultados Ciclos 2 y 3. Presentar sizing revisado al cliente.'),
+         'Analizar resultados Ciclos 2 y 3. Presentar sizing revisado SQL + sizing NAV/AD DS '
+         'con inventario completado.'),
         ('Ultima semana de abril (27-30/04)',
          'Ciclo 4 de monitorización para capturar pico de fin de mes. '
          'Programar manualmente a finales de abril.'),
         ('Mayo 2026',
-         'Sizing definitivo y propuesta de arquitectura Azure SQL. '
-         'Inicio del plan de migracion.'),
+         'Sizing definitivo completo (5 VMs). Propuesta economica con Azure Hybrid Benefit. '
+         'Inicio del plan de migracion IaaS en fases.'),
     ]
 
     steps_tbl = doc.add_table(rows=1, cols=3)
