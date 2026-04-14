@@ -84,7 +84,23 @@ Copy-Item $ConfigFile $destConfig -Force
 Write-Log "Config copiada a $destConfig" 'OK'
 
 # -------------------------------------------------------
-# 4. Registrar como Scheduled Task (inicio automatico SYSTEM)
+# 4. Detener procesos azbridge existentes (cualquier usuario)
+# -------------------------------------------------------
+Write-Log "Deteniendo instancias de azbridge en ejecucion..."
+$existingProcs = Get-Process -Name 'azbridge' -ErrorAction SilentlyContinue
+if ($existingProcs) {
+    $existingProcs | ForEach-Object {
+        Write-Log "Deteniendo azbridge PID $($_.Id)..." 'WARN'
+        $_ | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Seconds 2
+    Write-Log "Procesos azbridge detenidos" 'OK'
+} else {
+    Write-Log "No habia procesos azbridge en ejecucion" 'OK'
+}
+
+# -------------------------------------------------------
+# 5. Registrar como Scheduled Task (inicio automatico SYSTEM)
 # -------------------------------------------------------
 Write-Log "Registrando tarea programada '$ServiceName'..."
 
@@ -93,6 +109,7 @@ if ($existingTask) {
     Write-Log "Tarea '$ServiceName' ya existe. Actualizando..." 'WARN'
     if ($existingTask.State -eq 'Running') {
         Stop-ScheduledTask -TaskName $ServiceName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
     }
     Unregister-ScheduledTask -TaskName $ServiceName -Confirm:$false
 }
@@ -117,7 +134,7 @@ Register-ScheduledTask -TaskName $ServiceName `
 Write-Log "Tarea '$ServiceName' registrada (inicio automatico al arrancar, SYSTEM)" 'OK'
 
 # -------------------------------------------------------
-# 5. Arrancar la tarea ahora
+# 6. Arrancar la tarea ahora
 # -------------------------------------------------------
 Write-Log "Arrancando tarea '$ServiceName'..."
 Start-ScheduledTask -TaskName $ServiceName
@@ -132,7 +149,7 @@ if ($task.State -eq 'Running') {
 }
 
 # -------------------------------------------------------
-# 6. Resumen
+# 7. Resumen
 # -------------------------------------------------------
 Write-Host "`n========== SERVIDOR INSTALADO ==========" -ForegroundColor Green
 Write-Host @"
