@@ -39,3 +39,12 @@ client-*.yml
 server-relay.yml
 server-registry.json
 output/
+
+# Datos de monitorización SQL — contienen métricas del cliente (NUNCA commitear)
+docs/data/
+
+# Informes Word — contienen datos del cliente, nombres de servidor, logins SQL (NUNCA commitear a repo público)
+docs/*.docx
+
+# Lock files de Word
+docs/~$*.docx
