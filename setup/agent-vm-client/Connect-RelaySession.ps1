@@ -15,6 +15,9 @@
 #   .\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "DOMINIO\admin"
 #   .\Connect-RelaySession.ps1 -MachineName "srv-contab" -Username "admin" -Command "Get-Service"
 #   .\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "admin" -LocalPort 15987
+#   .\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "prod3" -AuthMethod Basic     # cuenta local
+#   .\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "DOMINIO\admin" -AuthMethod Negotiate
+# Si AuthMethod="Auto" (defecto): Negotiate para DOMINIO\user o user@dominio, Basic para cuentas locales.
 # ============================================================
 
 [CmdletBinding()]
@@ -27,6 +30,7 @@ param(
     [string]$ServerTaskName = 'RelayAdminServer',
     [string]$Command,
     [string]$Password,
+    [ValidateSet('Auto','Basic','Negotiate')][string]$AuthMethod = 'Auto',
     [switch]$NoSession
 )
 
@@ -137,11 +141,23 @@ try {
         $cred = Get-Credential -UserName $Username -Message "Credenciales para el equipo '$machineLower'"
     }
 
+    # Determinar método de autenticación (Auto detecta dominio por \ o @)
+    $resolvedAuth = if ($AuthMethod -ne 'Auto') {
+        $AuthMethod
+    } elseif ($Username -match '\\' -or $Username -match '@') {
+        'Negotiate'
+    } else {
+        'Basic'
+    }
+    Write-Log "Metodo de autenticacion: $resolvedAuth (usuario: $Username)" 'OK'
+    $sessOpt = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+
     if ($Command) {
         Write-Log "Ejecutando comando remoto en '$machineLower': $Command"
         $result = Invoke-Command -ComputerName $targetHost -Port $LocalPort `
             -Credential $cred `
-            -Authentication Basic `
+            -Authentication $resolvedAuth `
+            -SessionOption $sessOpt `
             -UseSSL:$false `
             -ScriptBlock ([ScriptBlock]::Create($Command))
         $result
@@ -150,7 +166,8 @@ try {
         Write-Host "  Para salir escribe: exit`n" -ForegroundColor Yellow
         Enter-PSSession -ComputerName $targetHost -Port $LocalPort `
             -Credential $cred `
-            -Authentication Basic
+            -Authentication $resolvedAuth `
+            -SessionOption $sessOpt
     }
 } finally {
     Write-Log "Sesion cerrada. El servidor Relay sigue corriendo en background." 'OK'
