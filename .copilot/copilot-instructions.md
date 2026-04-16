@@ -275,11 +275,11 @@ Write-Host "Reboot Pending: $reboot"
 az relay hyco list ...
 
 # ✅ SÍ funciona
-& 'C:\Users\A.almeida\AppData\Local\Programs\Python\Python313\python.exe' -m azure.cli relay hyco list ...
+& "$env:USERPROFILE\AppData\Local\Programs\Python\Python313\python.exe" -m azure.cli relay hyco list ...
 
 # O poner Python 3.13 primero en PATH en la sesión actual:
-$env:PATH = 'C:\Users\A.almeida\AppData\Local\Programs\Python\Python313;' +
-            'C:\Users\A.almeida\AppData\Local\Programs\Python\Python313\Scripts;' + $env:PATH
+$env:PATH = "$env:USERPROFILE\AppData\Local\Programs\Python\Python313;" +
+            "$env:USERPROFILE\AppData\Local\Programs\Python\Python313\Scripts;" + $env:PATH
 ```
 
 > `Get-RelayStatus.ps1` ya tiene este fallback incorporado. No hace falta hacer nada manual al ejecutarlo.
@@ -287,7 +287,7 @@ $env:PATH = 'C:\Users\A.almeida\AppData\Local\Programs\Python\Python313;' +
 ### Constantes de Proyecto
 
 ```powershell
-$REPO   = "C:\Users\A.almeida\source\repos\alejandrolmeida\windows-admin-copilot"
+$REPO   = "$env:USERPROFILE\source\repos\alejandrolmeida\windows-admin-copilot"
 $CFG    = "$REPO\.config"                   # Credenciales y config local (gitignored)
 $RELAY  = "$REPO\setup\agent-vm-client"     # Scripts de relay
 $CREDS  = "$CFG\credentials.json"
@@ -299,56 +299,37 @@ $REG    = "$CFG\server-registry.json"
 ```
 [Agente Copilot / Admin]
         │
-        │  New-PSSession → 127.0.0.2:15985 (loopback)
+        │  New-PSSession → 127.0.0.2:<PUERTO-LOCAL> (loopback)
         ▼
 [azbridge - Tarea: RelayAdminServer  (C:\RelayAdminServer\azbridge.exe)]
         │
-        │  TLS/443 → sb://relay-plenergy.servicebus.windows.net
+        │  TLS/443 → sb://<RELAY-NAMESPACE>.servicebus.windows.net
         ▼
-[Azure Relay — Hybrid Connection: winrm-srvplenoilfs]
+[Azure Relay — Hybrid Connection: winrm-<servidor>]
         │
-        │  → SRVPLENOILFS
+        │  → <SERVIDOR>
         ▼
 [azbridge - Tarea: RelayClient  (C:\RelayClient\azbridge.exe)]
         │
         │  WinRM → localhost:5985
         ▼
-[SRVPLENOILFS — Windows Server 2019 Standard]
+[<SERVIDOR> — Windows Server]
 ```
 
 ---
 
 ## 📋 SERVIDORES REGISTRADOS
 
-### `srvplenoilfs` — Servidor de Producción Plenoil
+Los servidores registrados y sus datos de conexión se almacenan localmente en `.config/server-registry.json` y `.config/credentials.json` (ambos gitignored).
 
-| Campo | Valor |
-|-------|-------|
-| Hostname | `SRVPLENOILFS` |
-| OS | Windows Server 2019 Standard |
-| RAM | 300 GB total |
-| Relay HC | `winrm-srvplenoilfs` |
-| Loopback IP | `127.0.0.2` |
-| Puerto WinRM | `15985` |
-| Auth | Basic / usuario `prod3` |
-| Credenciales | `$CFG\credentials.json` → `servers[name=srvplenoilfs]` |
+Para consultar los servidores disponibles y sus parámetros de conexión:
 
-**Discos conocidos:**
-| Unidad | Libre | Usado |
-|--------|-------|-------|
-| C: | ~1275 GB | ~724 GB |
-| E: | ~1272 GB | ~2227 GB |
-| F: | ~775 GB | ~224 GB |
-| G: | ~507 GB | ~2492 GB |
-| H: | ~631 GB | ~368 GB |
-| T: | ~314 GB | ~2685 GB |
+```powershell
+Get-Content "$CFG\server-registry.json" | ConvertFrom-Json | Select-Object name, localAddress, localPort
+Get-Content "$CFG\credentials.json" | ConvertFrom-Json | Select-Object -ExpandProperty servers | Select-Object name, auth
+```
 
-**Servicios clave instalados:**
-- `MicrosoftDynamicsNavServer$BC180_PLENOIL_UP` — Business Central PRODUCCIÓN
-- `MicrosoftDynamicsNavServer$BC180_PLENOIL_UP_DESA` — Business Central DESARROLLO
-- SQL Server (backend de BC)
-
-> ⚠️ Los dos servicios BC pueden estar parados si no están activos en ese momento. Verificar siempre antes de asumir incidencia.
+> ⚠️ Los datos de infraestructura del cliente (nombres de servidor, OS, RAM, servicios, capacidades de disco) se almacenan **exclusivamente** en `.config/` y **nunca** se publican en este repositorio.
 
 ---
 
@@ -362,11 +343,11 @@ $REG    = "$CFG\server-registry.json"
 
 Salida esperada: `✅ Activo  CONECTADO  Listeners: 1`
 
-### 2. Conectar a `srvplenoilfs`
+### 2. Conectar a un servidor registrado
 
 ```powershell
 $cfg = Get-Content "$CFG\credentials.json" -Raw | ConvertFrom-Json
-$srv = $cfg.servers | Where-Object { $_.name -eq 'srvplenoilfs' }
+$srv = $cfg.servers | Where-Object { $_.name -eq '<nombre-servidor>' }
 
 Set-Item WSMan:\localhost\Client\TrustedHosts -Value $srv.localAddress -Force
 
@@ -389,8 +370,8 @@ Enter-PSSession -Session $sess
 
 ```powershell
 # En el servidor de administración (este equipo):
-& "$RELAY\Add-RelayClient.ps1" -ResourceGroup "rg-relay" -Namespace "relay-plenergy" -MachineName "nuevo-server"
-# → Genera $CFG\client-nuevo-server.yml → copiar al equipo remoto
+& "$RELAY\Add-RelayClient.ps1" -ResourceGroup "<resource-group>" -Namespace "<relay-namespace>" -MachineName "<nuevo-servidor>"
+# → Genera $CFG\client-<nuevo-servidor>.yml → copiar al equipo remoto
 
 # En el equipo remoto (como Administrador):
 & "$RELAY\Register-RelayClient.ps1" -ConfigFile "client-nuevo-server.yml"
@@ -422,8 +403,8 @@ Enter-PSSession -Session $sess
 | Script | Cuándo usarlo |
 |--------|---------------|
 | `Get-RelayStatus.ps1 [-ShowListeners]` | **Diagnóstico rápido**. Siempre primero. |
-| `Get-VMStatus.ps1 -ResourceGroup rg-relay -Namespace relay-plenergy` | Visibilidad Azure API |
-| `Connect-RelaySession.ps1 -MachineName srvplenoilfs -Username prod3` | Sesión WinRM interactiva |
+| `Get-VMStatus.ps1 -ResourceGroup <rg> -Namespace <relay-namespace>` | Visibilidad Azure API |
+| `Connect-RelaySession.ps1 -MachineName <servidor> -Username <usuario>` | Sesión WinRM interactiva |
 | `Add-RelayClient.ps1` | Registrar nuevo servidor |
 | `Install-RelayServer.ps1` | Reinstalar tarea `RelayAdminServer` (una sola vez) |
 | `Remove-RelayServer.ps1` / `Remove-RelayClient.ps1` | Desinstalación |

@@ -15,7 +15,7 @@
 #   .\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "DOMINIO\admin"
 #   .\Connect-RelaySession.ps1 -MachineName "srv-contab" -Username "admin" -Command "Get-Service"
 #   .\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "admin" -LocalPort 15987
-#   .\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "prod3" -AuthMethod Basic     # cuenta local
+#   .\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "local-admin" -AuthMethod Basic     # cuenta local
 #   .\Connect-RelaySession.ps1 -MachineName "pc-juan" -Username "DOMINIO\admin" -AuthMethod Negotiate
 # Si AuthMethod="Auto" (defecto): Negotiate para DOMINIO\user o user@dominio, Basic para cuentas locales.
 # ============================================================
