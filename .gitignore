@@ -51,3 +51,7 @@ docs/~$*.docx
 
 # Scripts con datos de cliente hardcodeados
 docs/gen_migration_report.py
+
+# Carpeta de clientes — documentos, scripts y datos CONFIDENCIALES (NUNCA commitear)
+customers/*
+!customers/.gitkeep
